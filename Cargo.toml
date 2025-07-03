@@ -1,0 +1,17 @@
+[package]
+name = "disguise"
+version = "0.1.0"
+edition = "2024"
+
+description = "A tool for disguise mnemonics to another."
+authors = ["Artimonist <artimonist@gmail.com>"]
+homepage = "https://artimonist.org/"
+repository = "https://github.com/artimonist/disguise/"
+license = "MIT"
+keywords = ["bitcoin", "wallet", "mnemonic", "crypto", "btc", "art"]
+categories = ["cryptography"]
+
+[dependencies]
+anyhow = "1.0.98"
+clap = { version = "4.5.40", features = ["derive"] }
+inquire = "0.7.5"
