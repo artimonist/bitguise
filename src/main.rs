@@ -1,6 +1,6 @@
 use clap::Parser;
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
     #[arg(short, long)]
@@ -9,5 +9,5 @@ pub struct Cli {
 
 fn main() {
     let args = Cli::parse();
-    println!("Hello, world!");
+    println!("{args:?}");
 }

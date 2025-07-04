@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 const CHINESE_SIMPLIFIED: &str = include_str!("raw/chinese_simplified.txt");
 const CHINESE_TRADITIONAL: &str = include_str!("raw/chinese_traditional.txt");
 const CZECH: &str = include_str!("raw/czech.txt");
@@ -42,22 +40,6 @@ impl Language {
         ]
     }
 
-    pub fn from_str(lang: &str) -> Option<Self> {
-        match lang.to_lowercase().as_str() {
-            "chinese_simplified" => Some(Self::ChineseSimplified),
-            "chinese_traditional" => Some(Self::ChineseTraditional),
-            "czech" => Some(Self::Czech),
-            "english" => Some(Self::English),
-            "french" => Some(Self::French),
-            "italian" => Some(Self::Italian),
-            "japanese" => Some(Self::Japanese),
-            "korean" => Some(Self::Korean),
-            "portuguese" => Some(Self::Portuguese),
-            "spanish" => Some(Self::Spanish),
-            _ => None,
-        }
-    }
-
     pub fn wordlist(&self) -> impl Iterator<Item = &str> {
         match self {
             Self::ChineseSimplified => CHINESE_SIMPLIFIED.split_whitespace(),
@@ -83,6 +65,46 @@ impl Language {
 
     pub fn index_of(&self, word: &str) -> Option<usize> {
         self.wordlist().position(|w| w == word)
+    }
+
+    pub fn recognize(word: &str) -> Vec<Language> {
+        use crate::Language::*;
+        if let Some(ch) = word.chars().next() {
+            let langs = match ch as u32 {
+                0x1100..=0x11ff => vec![Korean],
+                0x3040..=0x309f => vec![Japanese],
+                0x4e00..=0x9f9f => vec![ChineseSimplified, ChineseTraditional],
+                _ => match word.is_ascii() {
+                    true => vec![English, Italian, Czech, Portuguese, French, Spanish],
+                    false => vec![French, Spanish],
+                },
+            };
+            return langs
+                .into_iter()
+                .filter(|lang| lang.index_of(word).is_some())
+                .collect();
+        }
+        vec![]
+    }
+}
+
+impl std::str::FromStr for Language {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "chinese_simplified" => Ok(Self::ChineseSimplified),
+            "chinese_traditional" => Ok(Self::ChineseTraditional),
+            "czech" => Ok(Self::Czech),
+            "english" => Ok(Self::English),
+            "french" => Ok(Self::French),
+            "italian" => Ok(Self::Italian),
+            "japanese" => Ok(Self::Japanese),
+            "korean" => Ok(Self::Korean),
+            "portuguese" => Ok(Self::Portuguese),
+            "spanish" => Ok(Self::Spanish),
+            _ => Err("Invalid BIP39 language"),
+        }
     }
 }
 
