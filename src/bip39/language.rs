@@ -9,7 +9,7 @@ const KOREAN: &str = include_str!("raw/korean.txt");
 const PORTUGUESE: &str = include_str!("raw/portuguese.txt");
 const SPANISH: &str = include_str!("raw/spanish.txt");
 
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Language {
     ChineseSimplified,
     ChineseTraditional,
@@ -67,7 +67,7 @@ impl Language {
         self.wordlist().position(|w| w == word)
     }
 
-    pub fn recognize(word: &str) -> Vec<Language> {
+    pub fn detect(word: &str) -> Vec<Language> {
         use crate::Language::*;
         if let Some(ch) = word.chars().next() {
             let langs = match ch as u32 {
@@ -89,7 +89,7 @@ impl Language {
 }
 
 impl std::str::FromStr for Language {
-    type Err = &'static str;
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -103,7 +103,7 @@ impl std::str::FromStr for Language {
             "korean" => Ok(Self::Korean),
             "portuguese" => Ok(Self::Portuguese),
             "spanish" => Ok(Self::Spanish),
-            _ => Err("Invalid BIP39 language"),
+            _ => Err(anyhow::anyhow!("Invalid BIP39 language")),
         }
     }
 }

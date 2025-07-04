@@ -1,12 +1,6 @@
 pub fn inquire_password(as_salt: bool) -> anyhow::Result<String> {
     use inquire::Password;
 
-    let help_msg = if as_salt {
-        "Program use encryption key as salt. (Toggle display by CTRL+R)"
-    } else {
-        "Input encryption key. (Toggle display by CTRL+R)"
-    };
-
     const INVALID_MSG: &str = "Encryption key must have at least 5 characters.";
     let validator = |v: &str| {
         if v.chars().count() < 5 {
@@ -14,6 +8,12 @@ pub fn inquire_password(as_salt: bool) -> anyhow::Result<String> {
         } else {
             Ok(inquire::validator::Validation::Valid)
         }
+    };
+
+    let help_msg = if as_salt {
+        "Program use encryption key as salt. (Toggle display by CTRL+R)"
+    } else {
+        "Input encryption key. (Toggle display by CTRL+R)"
     };
 
     Ok(Password::new("Encryption Key: ")
@@ -29,12 +29,12 @@ pub fn inquire_password(as_salt: bool) -> anyhow::Result<String> {
 }
 
 /// Prompt user to choose a mnemonic language.
-pub fn select_language(langs: &[crate::Language]) -> anyhow::Result<String> {
+pub fn select_language(langs: &[crate::Language]) -> anyhow::Result<crate::Language> {
     use inquire::Select;
 
     let options = langs.into_iter().map(|&v| format!("{v:?}")).collect();
     let choice = Select::new("Which mnemonic language do you want?", options)
         .with_page_size(langs.len())
         .prompt()?;
-    Ok(choice)
+    choice.parse()
 }
