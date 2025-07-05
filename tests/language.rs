@@ -1,4 +1,7 @@
 #![cfg(test)]
+mod common;
+
+use common::{Permutation, permutations};
 use disguise::Language;
 
 #[test]
@@ -27,36 +30,14 @@ fn test_mnemonic_common() {
     // all permutations mnemonic (12,15,18,21,24) in 100 English and French common words.
     // all permutations mnemonic (12,15,18,21,24) in 1275 Chinese common words.
 
-    let vec = std::cell::RefCell::new(vec![0; 3]);
-    for p in vec.permutations(3, 3) {
+    // let vec = std::cell::RefCell::new(Box::new(vec![]));
+    // for p in vec.permutations(3, 3) {
+    //     println!("{:?}", p);
+    // }
+    // assert_eq!(vec.permutations(3, 3).count(), 3_usize.pow(3));
+
+    for p in permutations!(3, 3) {
         println!("{:?}", p);
     }
-    assert_eq!(vec.permutations(3, 3).count(), 3_usize.pow(3));
-}
-
-use std::cell::{Ref, RefCell};
-type VecRef<'a> = Ref<'a, Vec<usize>>;
-type VecIterator<'a> = Box<dyn Iterator<Item = VecRef<'a>> + 'a>;
-
-trait Permutation {
-    fn permutations(&self, m: usize, n: usize) -> VecIterator<'_>;
-}
-
-impl Permutation for RefCell<Vec<usize>> {
-    fn permutations(&self, m: usize, n: usize) -> VecIterator<'_> {
-        debug_assert!(
-            m <= self.borrow().len(),
-            "m must be less than or equal to the length of the vector"
-        );
-
-        if m == 0 {
-            Box::new([self.borrow()].into_iter())
-        } else {
-            let iter = (0..n).flat_map(move |i| {
-                self.borrow_mut()[m - 1] = i;
-                self.permutations(m - 1, n)
-            });
-            Box::new(iter)
-        }
-    }
+    assert_eq!(permutations!(3, 3).count(), 3_usize.pow(3));
 }
