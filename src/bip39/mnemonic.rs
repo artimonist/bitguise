@@ -3,6 +3,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use xbits::FromBits;
 
+#[derive(Debug, Clone)]
 pub struct Mnemonic {
     words: Vec<String>,
     language: Language,
@@ -94,6 +95,12 @@ impl std::str::FromStr for Mnemonic {
             }),
             2.. => Err(MnemonicError::InconclusiveLanguage(languages)),
         }
+    }
+}
+
+impl std::fmt::Display for Mnemonic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{}: \"{}\"", self.language, self.words.join(" "))
     }
 }
 
