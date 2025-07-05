@@ -5,8 +5,11 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use xbits::FromBits;
 
+/// test sha256, xbits
+/// test data from: <https://iancoleman.io/bip39>
 #[test]
 fn test_checksum() {
+    // <https://iancoleman.io/bip39>
     let test_data = &[
         (
             "4475f031a327af4f6ffa7fe879bc3233",
