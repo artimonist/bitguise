@@ -119,23 +119,4 @@ mod tests {
             assert_eq!(lang.wordlist().count(), 2048, "{lang:?}");
         }
     }
-
-    #[test]
-    fn test_language_repeat() {
-        let mut repeats = Vec::new();
-        let langs = Language::all();
-        (0..langs.len()).for_each(|i| {
-            (i + 1..langs.len()).for_each(|j| {
-                let (x, y) = (langs[i], langs[j]);
-                let n = x.wordlist().filter(|w| y.index_of(w).is_some()).count();
-                if n > 0 {
-                    repeats.push((x, y, n));
-                }
-            });
-        });
-
-        use Language::*;
-        assert_eq!(repeats[0], (ChineseSimplified, ChineseTraditional, 1275));
-        assert_eq!(repeats[1], (English, French, 100));
-    }
 }

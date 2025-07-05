@@ -32,7 +32,7 @@ pub fn inquire_password(as_salt: bool) -> anyhow::Result<String> {
 pub fn select_language(langs: &[crate::Language]) -> anyhow::Result<crate::Language> {
     use inquire::Select;
 
-    let options = langs.into_iter().map(|&v| format!("{v:?}")).collect();
+    let options = langs.iter().map(|&v| format!("{v:?}")).collect();
     let choice = Select::new("Which mnemonic language do you want?", options)
         .with_page_size(langs.len())
         .prompt()?;

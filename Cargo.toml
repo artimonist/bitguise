@@ -12,7 +12,13 @@ keywords = ["bitcoin", "wallet", "mnemonic", "crypto", "btc", "art"]
 categories = ["cryptography"]
 
 [dependencies]
-anyhow = "1.0.98"
 clap = { version = "4.5.40", features = ["derive"] }
 inquire = "0.7.5"
 thiserror = "2.0.12"
+anyhow = "1.0.98"
+xbits = "0.8.0"
+sha2 = "0.10.9"
+
+[dev-dependencies]
+bitcoin = "0.32.6"
+hex = "0.4.3"
