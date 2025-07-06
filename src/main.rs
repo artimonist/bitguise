@@ -1,4 +1,9 @@
+mod bip39;
 mod commands;
+mod utils;
+
+pub use bip39::{Language, Mnemonic};
+pub use utils::{inquire_password, select_language};
 
 use crate::commands::{SearchCommand, TransformCommand, TranslateCommand};
 use clap::Parser;

@@ -1,15 +1,25 @@
 use super::Language;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
 use xbits::{FromBits, XBits};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mnemonic {
     words: Vec<String>,
     language: Language,
 }
 
 impl Mnemonic {
+    const fn check_mask(len: usize) -> u8 {
+        match len {
+            12 => 0b1111_0000,
+            15 => 0b1111_1000,
+            18 => 0b1111_1100,
+            21 => 0b1111_1110,
+            24 => 0b1111_1111,
+            _ => unreachable!(),
+        }
+    }
+
     /// Create a new mnemonic from raw entropy and language.
     /// # Arguments
     /// * `entropy` - A byte slice representing the entropy.  
@@ -20,25 +30,24 @@ impl Mnemonic {
     /// * `Ok(Mnemonic)` - If the mnemonic is successfully created.
     pub fn new(entropy: &[u8], language: Language) -> Result<Self, MnemonicError> {
         // verify length
-        if !matches!(entropy.len(), 16 | 20 | 24 | 28 | 32) {
-            return Err(MnemonicError::InvalidLength);
-        }
+        let length = match entropy.len() {
+            16 => 12,
+            20 => 15,
+            24 => 18,
+            28 => 21,
+            32 => 24,
+            _ => return Err(MnemonicError::InvalidLength),
+        };
 
         // calculate checksum
-        let check_mask = BTreeMap::from([
-            (16, 0b1111_0000),
-            (20, 0b1111_1000),
-            (24, 0b1111_1100),
-            (28, 0b1111_1110),
-            (32, 0b1111_1111),
-        ])[&entropy.len()];
-        let checksum = Sha256::digest(entropy)[0] & check_mask;
+        let checksum = Sha256::digest(entropy)[0] & Mnemonic::check_mask(length);
 
         // convert entropy to indices
         let indices: Vec<usize> = [entropy.to_vec(), vec![checksum]]
             .concat()
             .bits()
             .chunks(11)
+            .take(length)
             .collect();
 
         // convert indices to words
@@ -50,9 +59,13 @@ impl Mnemonic {
         Ok(Mnemonic { words, language })
     }
 
+    pub fn len(&self) -> usize {
+        self.words.len()
+    }
+
     #[inline(always)]
     pub fn indices(&self) -> Vec<usize> {
-        self.language.indices(self.words.iter()).unwrap()
+        self.language.indices(self.words.iter()).unwrap()[..self.words.len()].to_vec()
     }
 
     pub fn detect_language<T>(words: impl Iterator<Item = T>) -> Vec<Language>
@@ -70,23 +83,17 @@ impl Mnemonic {
     }
 
     pub fn verify_checksum(indices: &[usize]) -> Result<(), MnemonicError> {
-        const CHECK_MASK_ALL: [(usize, u8); 5] = [
-            (12, 0b1111_0000),
-            (15, 0b1111_1000),
-            (18, 0b1111_1100),
-            (21, 0b1111_1110),
-            (24, 0b1111_1111),
-        ];
-
-        let check_mask = *BTreeMap::from(CHECK_MASK_ALL)
-            .get(&indices.len())
-            .ok_or(MnemonicError::InvalidLength)?;
+        // verify length
+        if !matches!(indices.len(), 12 | 15 | 18 | 21 | 24) {
+            return Err(MnemonicError::InvalidLength);
+        }
 
         let mut entropy = Vec::from_bits_chunk(indices.iter().copied(), 11);
         let tail = entropy.pop().unwrap();
-        let checksum = Sha256::digest(&entropy)[0];
+        let checksum = Sha256::digest(&entropy)[0] & Mnemonic::check_mask(indices.len());
 
-        if checksum & check_mask != tail {
+        // verify checksum
+        if checksum != tail {
             return Err(MnemonicError::InvalidChecksum);
         }
         Ok(())
@@ -129,7 +136,7 @@ impl std::str::FromStr for Mnemonic {
 
 impl std::fmt::Display for Mnemonic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}: \"{}\"", self.language, self.words.join(" "))
+        write!(f, "{}", self.words.join(" "))
     }
 }
 
