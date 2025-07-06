@@ -20,7 +20,7 @@ impl Permutation for std::cell::RefCell<Vec<usize>> {
 }
 
 macro_rules! permutations {
-    ($m:expr, $n:expr) => {
+    ($m:literal, $n:literal) => {
         std::cell::RefCell::new(vec![0; $m])
             .permutations($m, $n)
             .map(|v| v.borrow())

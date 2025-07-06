@@ -30,14 +30,10 @@ fn test_mnemonic_common() {
     // all permutations mnemonic (12,15,18,21,24) in 100 English and French common words.
     // all permutations mnemonic (12,15,18,21,24) in 1275 Chinese common words.
 
-    // let vec = std::cell::RefCell::new(Box::new(vec![]));
-    // for p in vec.permutations(3, 3) {
-    //     println!("{:?}", p);
-    // }
-    // assert_eq!(vec.permutations(3, 3).count(), 3_usize.pow(3));
-
-    for p in permutations!(3, 3) {
-        println!("{:?}", p);
-    }
     assert_eq!(permutations!(3, 3).count(), 3_usize.pow(3));
+    assert_eq!(permutations!(3, 5).count(), 5_usize.pow(3));
+    assert_eq!(permutations!(3, 100).count(), 100_usize.pow(3));
+    // assert_eq!(permutations!(12, 100).count(), 100_usize.pow(12));
+
+    // It's too large, abandon.
 }
