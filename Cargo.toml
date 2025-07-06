@@ -3,7 +3,7 @@ name = "disguise"
 version = "0.1.0"
 edition = "2024"
 
-description = "A tool for disguise mnemonics to another."
+description = "Disguise mnemonics and wallets in a simple way."
 authors = ["Artimonist <artimonist@gmail.com>"]
 homepage = "https://artimonist.org/"
 repository = "https://github.com/artimonist/disguise/"

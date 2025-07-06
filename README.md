@@ -1,2 +1,2 @@
 # disguise
-Disguise mnemonic, xprv, private key to another mnemonic, xprv, private key etc.
+Disguise mnemonics and wallets in a simple way.
