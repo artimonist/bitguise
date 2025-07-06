@@ -10,25 +10,18 @@ pub struct Mnemonic {
 }
 
 impl Mnemonic {
-    pub fn detect_language<T>(words: impl Iterator<Item = T>) -> Result<Language, MnemonicError>
+    pub fn detect_language<T>(words: impl Iterator<Item = T>) -> Vec<Language>
     where
         T: AsRef<str>,
     {
         // words common languages
-        let mut languages = words
+        words
             .map(|w| Language::detect(w.as_ref()))
             .reduce(|mut acc, v| {
                 acc.retain(|x| v.contains(x));
                 acc
             })
-            .unwrap_or_default();
-
-        // return language
-        match languages.len() {
-            0 => Err(MnemonicError::InvalidLanguage),
-            1 => Ok(languages.pop().unwrap()),
-            2.. => Err(MnemonicError::InconclusiveLanguage(languages)),
-        }
+            .unwrap_or_default()
     }
 
     pub fn verify_checksum(indices: &[usize]) -> Result<(), MnemonicError> {
@@ -71,11 +64,7 @@ impl std::str::FromStr for Mnemonic {
         }
 
         // detect languages
-        let mut languages = match Mnemonic::detect_language(words.iter()) {
-            Ok(v) => Ok(vec![v]),
-            Err(MnemonicError::InconclusiveLanguage(vs)) => Ok(vs),
-            Err(e) => Err(e),
-        }?;
+        let mut languages = Mnemonic::detect_language(words.iter());
 
         // verify checksum
         languages.retain(|&language| {
