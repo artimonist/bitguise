@@ -18,3 +18,6 @@ pub struct MnemonicTarget {
     #[clap(value_name = "LENGTH", value_parser = ["12", "15", "18", "21", "24"], default_value = "24")]
     pub length: Option<usize>,
 }
+
+// encrypt mnemonic entropy.
+// generate a mnemonic from new entropy.

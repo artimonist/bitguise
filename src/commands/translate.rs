@@ -8,3 +8,8 @@ pub struct TranslateCommand {
     #[clap(hide = true, value_name = "LANGUAGE")]
     pub target: Option<String>,
 }
+
+// create a mnemonic from words.
+// get indices of the mnemonic words.
+// map indices to the target language words.
+// return the translated mnemonic as a string.

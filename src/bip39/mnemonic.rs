@@ -1,7 +1,7 @@
 use super::Language;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use xbits::FromBits;
+use xbits::{FromBits, XBits};
 
 #[derive(Debug, Clone)]
 pub struct Mnemonic {
@@ -10,6 +10,51 @@ pub struct Mnemonic {
 }
 
 impl Mnemonic {
+    /// Create a new mnemonic from raw entropy and language.
+    /// # Arguments
+    /// * `entropy` - A byte slice representing the entropy.  
+    ///   The entropy length must be one of: 16, 20, 24, 28, or 32 bytes.
+    ///   Mnemonic lengths will be 12, 15, 18, 21, or 24 words respectively.
+    /// * `language` - The language of the mnemonic.
+    /// # Returns
+    /// * `Ok(Mnemonic)` - If the mnemonic is successfully created.
+    pub fn new(entropy: &[u8], language: Language) -> Result<Self, MnemonicError> {
+        // verify length
+        if !matches!(entropy.len(), 16 | 20 | 24 | 28 | 32) {
+            return Err(MnemonicError::InvalidLength);
+        }
+
+        // calculate checksum
+        let check_mask = BTreeMap::from([
+            (16, 0b1111_0000),
+            (20, 0b1111_1000),
+            (24, 0b1111_1100),
+            (28, 0b1111_1110),
+            (32, 0b1111_1111),
+        ])[&entropy.len()];
+        let checksum = Sha256::digest(entropy)[0] & check_mask;
+
+        // convert entropy to indices
+        let indices: Vec<usize> = [entropy.to_vec(), vec![checksum]]
+            .concat()
+            .bits()
+            .chunks(11)
+            .collect();
+
+        // convert indices to words
+        let words = indices
+            .iter()
+            .map(|&i| language.word_at(i).unwrap_or_default().to_string())
+            .collect();
+
+        Ok(Mnemonic { words, language })
+    }
+
+    #[inline(always)]
+    pub fn indices(&self) -> Vec<usize> {
+        self.language.indices(self.words.iter()).unwrap()
+    }
+
     pub fn detect_language<T>(words: impl Iterator<Item = T>) -> Vec<Language>
     where
         T: AsRef<str>,
@@ -45,11 +90,6 @@ impl Mnemonic {
             return Err(MnemonicError::InvalidChecksum);
         }
         Ok(())
-    }
-
-    #[inline(always)]
-    pub fn indices(&self) -> Vec<usize> {
-        self.language.indices(self.words.iter()).unwrap()
     }
 }
 
