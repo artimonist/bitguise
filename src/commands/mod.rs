@@ -1,7 +1,7 @@
-mod retrieve;
+mod search;
 mod transform;
 mod translate;
 
-pub use retrieve::RetrieveCommand;
+pub use search::SearchCommand;
 pub use transform::TransformCommand;
 pub use translate::TranslateCommand;

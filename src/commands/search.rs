@@ -1,5 +1,5 @@
 #[derive(clap::Parser, Debug)]
-pub struct RetrieveCommand {
+pub struct SearchCommand {
     /// The name of the article to retrieve.
     #[clap(value_name = "ARTICLE")]
     pub article: String,

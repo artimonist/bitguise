@@ -1,6 +1,6 @@
 mod commands;
 
-use crate::commands::{RetrieveCommand, TransformCommand, TranslateCommand};
+use crate::commands::{SearchCommand, TransformCommand, TranslateCommand};
 use clap::Parser;
 
 fn main() {
@@ -22,7 +22,7 @@ pub enum Commands {
     Translate(TranslateCommand),
 
     /// Retrieve a mnemonic from a given article.
-    Retrieve(RetrieveCommand),
+    Retrieve(SearchCommand),
 
     /// Transform a mnemonic to another.
     Transform(TransformCommand),
