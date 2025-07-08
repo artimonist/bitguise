@@ -9,6 +9,10 @@ pub struct SearchCommand {
     /// The name of the article to search.
     #[clap(value_name = "FILE")]
     pub article: String,
+
+    /// The language of the article.
+    #[clap(hide = true, env = "ARTIMONIST_TARGET_LANGUAGE")]
+    pub language: Option<Language>,
 }
 
 // detect article language from the article words.
@@ -23,36 +27,30 @@ use Language::*;
 
 impl Execute for SearchCommand {
     fn execute(&self) -> anyhow::Result<()> {
-        let language = select_language(&Language::all())?;
+        let language = match self.language {
+            Some(lang) => lang,
+            None => select_language(&Language::all())?,
+        };
 
         let mut o = BufWriter::new(std::io::stdout());
         let file = File::open(&self.article)?;
         for line in BufReader::new(file).lines() {
-            if matches!(language, ChineseSimplified | ChineseTraditional) {
-                let mnemonics = line?
+            let translate = |s: &str| {
+                language
+                    .index_of(s)
+                    .map_or(".".to_string(), |_| format!(" {s} "))
+            };
+
+            let mnemonics = if matches!(language, ChineseSimplified | ChineseTraditional) {
+                line?
                     .chars()
                     .filter(|c| !c.is_whitespace())
-                    .map(|c| {
-                        language
-                            .index_of(c.to_string().as_str())
-                            .map_or(".".to_string(), |_| format!(" {c} "))
-                    })
+                    .map(|c| translate(c.to_string().as_ref()))
                     .collect::<Vec<_>>()
-                    .join("");
-                writeln!(o, "{mnemonics}")?;
             } else {
-                let mnemonics = line?
-                    .split_whitespace()
-                    .map(|w| {
-                        language
-                            .index_of(w)
-                            .map_or(".".to_string(), |_| format!(" {w} "))
-                    })
-                    .collect::<Vec<_>>()
-                    .join("");
-                writeln!(o, "{mnemonics}")?;
-            }
-            o.flush()?;
+                line?.split_whitespace().map(translate).collect::<Vec<_>>()
+            };
+            writeln!(o, "{}", mnemonics.join(""))?;
         }
         Ok(())
     }

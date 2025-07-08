@@ -59,11 +59,13 @@ impl Mnemonic {
         Ok(Mnemonic { words, language })
     }
 
-    pub fn len(&self) -> usize {
+    /// Mnemonic words count.
+    #[inline]
+    pub fn count(&self) -> usize {
         self.words.len()
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn indices(&self) -> Vec<usize> {
         self.language.indices(self.words.iter()).unwrap()[..self.words.len()].to_vec()
     }

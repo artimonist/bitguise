@@ -23,6 +23,7 @@ xbits = "0.8.0"
 sha2 = "0.10.9"
 
 [dev-dependencies]
+assert_cmd = "2.0.17"
 bitcoin = "0.32.6"
 hex = "0.4.3"
 itertools = "0.14.0"
