@@ -30,7 +30,6 @@ impl Execute for TranslateCommand {
             None => select_language(&Language::all())?,
         };
 
-        println!("{language}");
         // translate the mnemonic to the target language
         let words = mnemonic
             .indices()
