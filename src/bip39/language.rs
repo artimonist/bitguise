@@ -92,9 +92,9 @@ impl std::str::FromStr for Language {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "chinese_simplified" => Ok(Self::ChineseSimplified),
-            "chinese_traditional" => Ok(Self::ChineseTraditional),
+        match s.to_lowercase().as_str() {
+            "chinesesimplified" => Ok(Self::ChineseSimplified),
+            "chinesetraditional" => Ok(Self::ChineseTraditional),
             "czech" => Ok(Self::Czech),
             "english" => Ok(Self::English),
             "french" => Ok(Self::French),

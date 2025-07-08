@@ -11,8 +11,11 @@ license = "MIT"
 keywords = ["bitcoin", "wallet", "mnemonic", "crypto", "btc", "art"]
 categories = ["cryptography"]
 
+[[bin]]
+name = "disguise"
+
 [dependencies]
-clap = { version = "4.5.40", features = ["derive"] }
+clap = { version = "4.5.40", features = ["derive", "env"] }
 inquire = "0.7.5"
 thiserror = "2.0.12"
 anyhow = "1.0.98"

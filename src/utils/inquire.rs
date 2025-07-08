@@ -28,8 +28,9 @@ pub fn inquire_password(as_salt: bool) -> anyhow::Result<String> {
         .map(|s| s.to_string())?)
 }
 
+use disguise::Language;
 /// Prompt user to choose a mnemonic language.
-pub fn select_language(langs: &[crate::Language]) -> anyhow::Result<crate::Language> {
+pub fn select_language(langs: &[Language]) -> anyhow::Result<Language> {
     use inquire::Select;
 
     let options = langs.iter().map(|&v| format!("{v:?}")).collect();

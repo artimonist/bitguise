@@ -1,3 +1,5 @@
+use crate::commands::Execute;
+
 #[derive(clap::Parser, Debug)]
 pub struct TransformCommand {
     /// The mnemonic to transform.
@@ -21,3 +23,9 @@ pub struct MnemonicTarget {
 
 // encrypt mnemonic entropy.
 // generate a mnemonic from new entropy.
+
+impl Execute for TransformCommand {
+    fn execute(&self) -> anyhow::Result<()> {
+        todo!("Implement the transform command logic");
+    }
+}

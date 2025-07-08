@@ -1,12 +1,10 @@
+use crate::commands::Execute;
+
 #[derive(clap::Parser, Debug)]
 pub struct SearchCommand {
-    /// The name of the article to retrieve.
-    #[clap(value_name = "ARTICLE")]
+    /// The name of the article to search.
+    #[clap(value_name = "FILE")]
     pub article: String,
-
-    /// The language of the article to retrieve.
-    #[clap(hide = true, value_name = "LANGUAGE")]
-    pub language: Option<String>,
 }
 
 // detect article language from the article words.
@@ -16,3 +14,9 @@ pub struct SearchCommand {
 // search all mnemonic words from the article by detected language.
 // permutation all mnemonics by ordinal words.
 // if checksum is valid, return the mnemonic.
+
+impl Execute for SearchCommand {
+    fn execute(&self) -> anyhow::Result<()> {
+        todo!("Implement the search command logic")
+    }
+}
