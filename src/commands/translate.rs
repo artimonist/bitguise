@@ -13,7 +13,7 @@ pub struct TranslateCommand {
     pub mnemonic: String,
 
     /// The target language for the translation.
-    #[clap(hide = true, env = "ARTIMONIST_TARGET_LANGUAGE")]
+    #[clap(hide = true, long = "target")]
     pub language: Option<Language>,
 }
 

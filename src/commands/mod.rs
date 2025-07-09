@@ -1,3 +1,4 @@
+mod compress;
 mod search;
 mod transform;
 mod translate;

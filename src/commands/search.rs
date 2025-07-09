@@ -11,7 +11,7 @@ pub struct SearchCommand {
     pub article: String,
 
     /// The language of the article.
-    #[clap(hide = true, env = "ARTIMONIST_TARGET_LANGUAGE")]
+    #[clap(hide = true, long = "target")]
     pub language: Option<Language>,
 }
 
@@ -41,7 +41,7 @@ impl Execute for SearchCommand {
                     .map_or(".".to_string(), |_| format!(" {s} "))
             };
 
-            let mnemonics = if matches!(language, ChineseSimplified | ChineseTraditional) {
+            let words = if matches!(language, ChineseSimplified | ChineseTraditional) {
                 line?
                     .chars()
                     .filter(|c| !c.is_whitespace())
@@ -50,7 +50,7 @@ impl Execute for SearchCommand {
             } else {
                 line?.split_whitespace().map(translate).collect::<Vec<_>>()
             };
-            writeln!(o, "{}", mnemonics.join(""))?;
+            writeln!(o, "{}", words.join(""))?;
         }
         Ok(())
     }
