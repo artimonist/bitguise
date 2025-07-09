@@ -21,6 +21,7 @@ thiserror = "2.0.12"
 anyhow = "1.0.98"
 xbits = "0.8.0"
 sha2 = "0.10.9"
+aes-gcm = "0.10.3"
 
 [dev-dependencies]
 assert_cmd = "2.0.17"
