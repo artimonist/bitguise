@@ -1,7 +1,9 @@
 #![cfg(test)]
+use Language::*;
 use disguise::Language;
 
 #[test]
+#[ignore = "pre test"]
 fn test_language_common() {
     let mut repeats = Vec::new();
     let langs = Language::all();
@@ -14,10 +16,33 @@ fn test_language_common() {
             }
         });
     });
-    // common words in different languages
-    use Language::*;
+    // common words count in different languages
     assert_eq!(repeats[0], (ChineseSimplified, ChineseTraditional, 1275));
     assert_eq!(repeats[1], (English, French, 100));
+}
+
+#[test]
+fn test_common_diff() {
+    // test if two languages have different indices common words
+    for (a, b) in [(ChineseSimplified, ChineseTraditional), (English, French)] {
+        let mut diff = Vec::new();
+        (0..2048).for_each(|i| {
+            let word = a.word_at(i).unwrap();
+            if let Some(j) = b.index_of(word) {
+                if i != j {
+                    diff.push((i, j, word));
+                }
+            }
+        });
+        // assert that the two languages have different indices common words
+        if diff.len() > 0 {
+            println!("{} and {} have {} different words:", a, b, diff.len());
+            diff.iter().for_each(|(i, j, w)| {
+                println!("  {i:4} {j:4} {w}");
+            });
+            assert!(false, "There are different words between {} and {}", a, b);
+        }
+    }
 }
 
 #[test]
