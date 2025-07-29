@@ -1,5 +1,5 @@
 use crate::commands::Execute;
-use crate::select_language;
+use crate::utils::select_language;
 use disguise::Language;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};

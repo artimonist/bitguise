@@ -1,4 +1,3 @@
-// mod bip39;
 mod language;
 mod mnemonic;
 

@@ -3,8 +3,8 @@ use std::str::FromStr;
 use anyhow::Ok;
 use disguise::Language;
 
-use super::Execute;
-use crate::{Mnemonic, select_language};
+use crate::Execute;
+use crate::{Mnemonic, utils::select_language};
 
 #[derive(clap::Parser, Debug)]
 pub struct TranslateCommand {
