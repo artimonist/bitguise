@@ -4,12 +4,12 @@ use sha2::{Digest, Sha256};
 use xbits::FromBits;
 
 pub trait MnemonicEncryption {
-    fn encrypt(&self, pwd: &str, lang: Language) -> Mnemonic;
-    fn decrypt(&self, pwd: &str, lang: Language) -> Mnemonic;
+    fn encrypt(&self, pwd: &str, lang: Language) -> anyhow::Result<Mnemonic>;
+    fn decrypt(&self, pwd: &str, lang: Language) -> anyhow::Result<Mnemonic>;
 }
 
 impl MnemonicEncryption for Mnemonic {
-    fn encrypt(&self, pwd: &str, lang: Language) -> Mnemonic {
+    fn encrypt(&self, pwd: &str, lang: Language) -> anyhow::Result<Mnemonic> {
         assert_eq!(self.size(), 12);
 
         let indices = self.indices();
@@ -20,10 +20,11 @@ impl MnemonicEncryption for Mnemonic {
 
         let key: [u8; 32] = Sha256::digest(pwd.as_bytes()).into();
         entropy.aes_ecb_encrypt(&key);
-        Mnemonic::new(&entropy, lang).unwrap() // fixed size 16
+
+        Ok(Mnemonic::new(&entropy, lang)?)
     }
 
-    fn decrypt(&self, pwd: &str, lang: Language) -> Mnemonic {
+    fn decrypt(&self, pwd: &str, lang: Language) -> anyhow::Result<Mnemonic> {
         assert_eq!(self.size(), 12);
 
         let indices = self.indices();
@@ -34,6 +35,7 @@ impl MnemonicEncryption for Mnemonic {
 
         let key: [u8; 32] = Sha256::digest(pwd.as_bytes()).into();
         entropy.aes_ecb_decrypt(&key);
-        Mnemonic::new(&entropy, lang).unwrap() // fixed size 16
+
+        Ok(Mnemonic::new(&entropy, lang)?)
     }
 }
