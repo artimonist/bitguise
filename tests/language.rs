@@ -4,7 +4,7 @@ use disguise::Language;
 
 #[test]
 #[ignore = "pre test"]
-fn test_language_common() {
+fn language_common_count() {
     let mut repeats = Vec::new();
     let langs = Language::all();
     (0..langs.len()).for_each(|i| {
@@ -22,7 +22,7 @@ fn test_language_common() {
 }
 
 #[test]
-fn test_common_diff() {
+fn language_common_diff() {
     // test if two languages have different indices common words
     for (a, b) in [(ChineseSimplified, ChineseTraditional), (English, French)] {
         let mut diff = Vec::new();
@@ -46,7 +46,7 @@ fn test_common_diff() {
 }
 
 #[test]
-fn test_mnemonic_common() {
+fn language_comman_mnemonic() {
     // test if a mnemonic has two language and verified checksum
 
     // all permutations mnemonic (12,15,18,21,24) in 100 English and French common words.

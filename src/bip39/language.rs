@@ -67,6 +67,7 @@ impl Language {
         self.wordlist().position(|w| w == word)
     }
 
+    /// detect word languages
     pub fn detect(word: &str) -> Vec<Language> {
         use crate::Language::*;
         if let Some(ch) = word.chars().next() {

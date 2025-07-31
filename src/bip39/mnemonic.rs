@@ -75,13 +75,21 @@ impl Mnemonic {
         T: AsRef<str>,
     {
         // words common languages
-        words
+        let langs = words
             .map(|w| Language::detect(w.as_ref()))
             .reduce(|mut acc, v| {
                 acc.retain(|x| v.contains(x));
                 acc
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+
+        // ignore if common words has same indices
+        use Language::*;
+        match &langs[..] {
+            &[ChineseSimplified, ChineseTraditional] => vec![ChineseSimplified],
+            &[ChineseTraditional, ChineseSimplified] => vec![ChineseSimplified],
+            _ => langs,
+        }
     }
 
     pub fn verify_checksum(indices: &[usize]) -> Result<(), MnemonicError> {
