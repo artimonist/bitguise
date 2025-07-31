@@ -60,9 +60,15 @@ impl Mnemonic {
     }
 
     /// Mnemonic words count.
-    #[inline]
+    #[inline(always)]
     pub fn size(&self) -> usize {
         self.words.len()
+    }
+
+    /// Get the mnemonic words.
+    #[inline(always)]
+    pub fn words(&self) -> &[String] {
+        &self.words
     }
 
     #[inline]

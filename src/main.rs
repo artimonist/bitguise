@@ -12,8 +12,8 @@ fn main() {
     let args = Cli::parse();
     match args.command {
         Commands::Translate(cmd) => cmd.execute(),
-        Commands::Search(cmd) => cmd.execute(),
-        Commands::Transform(cmd) => cmd.execute(),
+        // Commands::Search(cmd) => cmd.execute(),
+        // Commands::Transform(cmd) => cmd.execute(),
         Commands::Encrypt(cmd) => cmd.execute(),
     }
     .unwrap_or_else(|e| eprintln!("Error: {e}"))

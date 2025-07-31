@@ -4,11 +4,8 @@ mod search;
 mod transform;
 mod translate;
 
-pub use search::SearchCommand;
-pub use transform::TransformCommand;
-pub use translate::TranslateCommand;
-
-use crate::commands::encrypt::EncryptCommand;
+use encrypt::EncryptCommand;
+use translate::TranslateCommand;
 
 pub trait Execute {
     fn execute(&self) -> anyhow::Result<()>;
@@ -28,11 +25,11 @@ pub enum Commands {
     Translate(TranslateCommand),
 
     /// Search mnemonic words from a given article.
-    Search(SearchCommand),
+    // Search(SearchCommand),
+
+    /// Transform a mnemonic to another.
+    // Transform(TransformCommand),
 
     /// Encrypt mnemonic 12 to another mnemonic
     Encrypt(EncryptCommand),
-
-    /// Transform a mnemonic to another.
-    Transform(TransformCommand),
 }
