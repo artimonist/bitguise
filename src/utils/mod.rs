@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 mod inquire;
 
 pub use inquire::inquire_password;

@@ -14,7 +14,7 @@ fn main() {
         Commands::Translate(cmd) => cmd.execute(),
         // Commands::Search(cmd) => cmd.execute(),
         // Commands::Transform(cmd) => cmd.execute(),
-        Commands::Encrypt(cmd) => cmd.execute(),
+        // Commands::Encrypt(cmd) => cmd.execute(),
     }
     .unwrap_or_else(|e| eprintln!("Error: {e}"))
 }

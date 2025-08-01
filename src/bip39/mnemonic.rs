@@ -100,8 +100,8 @@ impl Mnemonic {
         // ignore if common words has same indices
         use Language::*;
         match &langs[..] {
-            &[ChineseSimplified, ChineseTraditional] => vec![ChineseSimplified],
-            &[ChineseTraditional, ChineseSimplified] => vec![ChineseSimplified],
+            [ChineseSimplified, ChineseTraditional] => vec![ChineseSimplified],
+            [ChineseTraditional, ChineseSimplified] => vec![ChineseSimplified],
             _ => langs,
         }
     }

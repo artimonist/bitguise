@@ -10,28 +10,28 @@ pub trait AesEncryption {
 
 impl AesEncryption for [u8; 16] {
     fn aes_ecb_encrypt(&mut self, key: &[u8; 32]) {
-        let mut block = GenericArray::from_mut_slice(self);
+        let block = GenericArray::from_mut_slice(self);
         let cipher = aes::Aes256::new_from_slice(key).unwrap(); // fixed size 32
-        cipher.encrypt_block(&mut block);
+        cipher.encrypt_block(block);
     }
 
     fn aes_ecb_decrypt(&mut self, key: &[u8; 32]) {
-        let mut block = GenericArray::from_mut_slice(self);
+        let block = GenericArray::from_mut_slice(self);
         let cipher = aes::Aes256::new_from_slice(key).unwrap(); // fixed size 32
-        cipher.decrypt_block(&mut block);
+        cipher.decrypt_block(block);
     }
 }
 
 impl AesEncryption for [u8; 32] {
     fn aes_ecb_encrypt(&mut self, key: &[u8; 32]) {
-        let mut block = GenericArray::from_mut_slice(self);
+        let block = GenericArray::from_mut_slice(self);
         let cipher = aes::Aes256::new_from_slice(key).unwrap(); // fixed size 32
-        cipher.encrypt_block(&mut block);
+        cipher.encrypt_block(block);
     }
 
     fn aes_ecb_decrypt(&mut self, key: &[u8; 32]) {
-        let mut block = GenericArray::from_mut_slice(self);
+        let block = GenericArray::from_mut_slice(self);
         let cipher = aes::Aes256::new_from_slice(key).unwrap(); // fixed size 32
-        cipher.decrypt_block(&mut block);
+        cipher.decrypt_block(block);
     }
 }

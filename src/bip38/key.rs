@@ -1,6 +1,5 @@
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArray};
-use bitcoin::{Address, NetworkKind, PrivateKey, secp256k1::Secp256k1};
-use bitcoin::{base58, hashes::Hash, hashes::sha256};
+use bitcoin::{Address, NetworkKind, PrivateKey, base58, secp256k1::Secp256k1};
 use unicode_normalization::UnicodeNormalization;
 
 /// Prefix of all non ec encrypted keys.
@@ -12,16 +11,16 @@ const PRE_NON_EC: [u8; 2] = [0x01, 0x42];
 ///  [Description](https://blockcoach.com/2023/202306/2023-06-20-A-BIP38/)
 ///  [Implementation](https://github.com/ceca69ec/bip38)
 pub trait Bip38 {
-    fn encrypt_non_ec(&self, passphrase: &str) -> anyhow::Result<String>;
-    fn decrypt_non_ec(wif: &str, passphrase: &str) -> anyhow::Result<PrivateKey>;
+    fn encrypt_non_ec(&self, passphrase: &str) -> Result<String, Bip38Error>;
+    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<PrivateKey, Bip38Error>;
 }
 
 impl Bip38 for PrivateKey {
-    fn encrypt_non_ec(&self, passphrase: &str) -> anyhow::Result<String> {
+    fn encrypt_non_ec(&self, passphrase: &str) -> Result<String, Bip38Error> {
         let salt = {
             let pub_key = self.public_key(&Secp256k1::default());
             let address = Address::p2pkh(pub_key, NetworkKind::Main).to_string();
-            sha256::Hash::hash(address.to_string().as_bytes())[0..4].to_vec()
+            address.as_bytes().sha256_n(2)[0..4].to_vec()
         };
         let mut scrypt_key = [0u8; 64];
         {
@@ -56,10 +55,10 @@ impl Bip38 for PrivateKey {
         Ok(base58::encode_check(&buffer))
     }
 
-    fn decrypt_non_ec(wif: &str, passphrase: &str) -> anyhow::Result<PrivateKey> {
+    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<PrivateKey, Bip38Error> {
         let mut ebuffer = base58::decode_check(wif)?;
         if ebuffer.len() != 39 || ebuffer[..2] != PRE_NON_EC {
-            return Err(anyhow::anyhow!("Invalid BIP38 encrypted key"));
+            return Err(Bip38Error::InvalidKey);
         }
         let compress = (ebuffer[2] & 0x20) == 0x20;
         let salt = &ebuffer[3..7].to_vec();
@@ -69,7 +68,7 @@ impl Bip38 for PrivateKey {
         {
             let pass = passphrase.nfc().collect::<String>();
             let params = scrypt::Params::new(14, 8, 8, 64)?;
-            scrypt::scrypt(pass.as_bytes(), &salt, &params, &mut scrypt_key)?;
+            scrypt::scrypt(pass.as_bytes(), salt, &params, &mut scrypt_key)?;
         };
 
         // Decrypt the two parts of the key
@@ -84,17 +83,52 @@ impl Bip38 for PrivateKey {
             .zip(part1.iter().chain(part2.iter()))
             .for_each(|(x, y)| *x ^= y);
 
-        let mut prvk = PrivateKey::from_slice(&half1, NetworkKind::Main)?;
+        let mut prvk = PrivateKey::from_slice(half1, NetworkKind::Main)?;
         prvk.compressed = compress;
         {
             // Verify the checksum
             let pub_key = prvk.public_key(&Secp256k1::default());
             let address = Address::p2pkh(pub_key, NetworkKind::Main).to_string();
-            let checksum = sha256::Hash::hash(address.as_bytes())[..4].to_vec();
+            let checksum = address.as_bytes().sha256_n(2)[..4].to_vec();
             if checksum != *salt {
-                return Err(anyhow::anyhow!("Invalid passphrase or checksum mismatch"));
+                return Err(Bip38Error::InvalidChecksum);
             }
         }
         Ok(prvk)
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Bip38Error {
+    #[error("Invalid BIP38 encrypted key")]
+    InvalidKey,
+    #[error("Invalid passphrase or checksum mismatch")]
+    InvalidChecksum,
+    #[error("Scrypt error: {0}")]
+    ScryptOutput(#[from] scrypt::errors::InvalidOutputLen),
+    #[error("Scrypt error: {0}")]
+    ScryptParams(#[from] scrypt::errors::InvalidParams),
+    #[error("AES error: {0}")]
+    AesError(#[from] aes::cipher::InvalidLength),
+    #[error("Base58 error: {0}")]
+    Base58Error(#[from] bitcoin::base58::Error),
+    #[error("Invalid private key: {0}")]
+    InvalidPrivateKey(#[from] bitcoin::secp256k1::Error),
+}
+
+trait Sha256N {
+    fn sha256_n(&self, n: usize) -> [u8; 32];
+}
+
+impl Sha256N for [u8] {
+    fn sha256_n(&self, n: usize) -> [u8; 32] {
+        use bitcoin::{hashes::Hash, hashes::sha256};
+
+        assert!(n > 0, "Cannot hash zero times");
+        let mut hash = sha256::Hash::hash(self).to_byte_array();
+        for _ in 1..n {
+            hash = sha256::Hash::hash(&hash).to_byte_array();
+        }
+        hash
     }
 }

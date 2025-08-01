@@ -1,10 +1,10 @@
 mod compress;
-mod encrypt;
+// mod encrypt;
 mod search;
 mod transform;
 mod translate;
 
-use encrypt::EncryptCommand;
+// use encrypt::EncryptCommand;
 use translate::TranslateCommand;
 
 pub trait Execute {
@@ -23,13 +23,12 @@ pub struct Cli {
 pub enum Commands {
     /// Translate a mnemonic to a different language.
     Translate(TranslateCommand),
-
-    /// Search mnemonic words from a given article.
+    // Search mnemonic words from a given article.
     // Search(SearchCommand),
 
-    /// Transform a mnemonic to another.
+    // Transform a mnemonic to another.
     // Transform(TransformCommand),
 
-    /// Encrypt mnemonic 12 to another mnemonic
-    Encrypt(EncryptCommand),
+    // Encrypt mnemonic 12 to another mnemonic
+    // Encrypt(EncryptCommand),
 }

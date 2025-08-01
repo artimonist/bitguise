@@ -25,7 +25,7 @@ impl crate::Execute for EncryptCommand {
         assert!(self.mnemonic.size() == 12, "Mnemonic must be 12 words");
 
         let language = match self.language {
-            Some(ref lang) => lang.clone(),
+            Some(ref lang) => *lang,
             None => select_language(&Language::all())?,
         };
         let password = match self.password {
@@ -46,8 +46,8 @@ impl crate::Execute for EncryptCommand {
                 .filter(|w| article.contains(w))
                 .count();
             if count == mnemonic.words().len() {
-                println!("");
-                println!("Found valid mnemonic: {i}: {}", mnemonic);
+                println!();
+                println!("Found valid mnemonic: {i}: {mnemonic}",);
             } else if count > 10 {
                 print!("{i}: {count}, ");
             }
@@ -99,7 +99,7 @@ impl Article {
                 .collect()
         };
 
-        let dic = HashSet::from_iter(words.into_iter());
+        let dic = HashSet::from_iter(words);
         Ok(Self {
             // filename: filename.to_string(),
             // language,
@@ -109,7 +109,7 @@ impl Article {
     }
 
     pub fn contains(&self, word: &str) -> bool {
-        self.dic.contains(&word.to_string())
+        self.dic.contains(word)
     }
 }
 
