@@ -139,16 +139,24 @@ mod tests {
 
     #[test]
     fn test_non_ec() {
-        let TEST_DATA = [
+        const TEST_DATA: &[&str] = &[
+            // No compression, no EC multiply
             "TestingOneTwoThree",
-            "5KN7MzqK5wt2TP1fQCYyHBtDrXdJuXbUzm4A9rKAteGu3Qi5CVR",
             "6PRVWUbkzzsbcVac2qwfssoUJAN1Xhrg6bNk8J7Nzm5H7kxEbn2Nh2ZoGg",
+            "5KN7MzqK5wt2TP1fQCYyHBtDrXdJuXbUzm4A9rKAteGu3Qi5CVR",
             "Satoshi",
-            "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi5",
             "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq",
+            "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi5",
             "ϓ\0𐐀💩",
-            "5Jajm8eQ22H3pGWLEVCXyvND8dQZhiQhoLJNKjYXk9roUFTMSZ4",
             "6PRW5o9FLp4gJDDVqJQKJFTpMvdsSGJxMYHtHaQBF3ooa8mwD69bapcDQn",
+            "5Jajm8eQ22H3pGWLEVCXyvND8dQZhiQhoLJNKjYXk9roUFTMSZ4",
+            // Compression, no EC multiply
+            "TestingOneTwoThree",
+            "6PYNKZ1EAgYgmQfmNVamxyXVWHzK5s6DGhwP4J5o44cvXdoY7sRzhtpUeo",
+            "L44B5gGEpqEDRS9vVPz7QT35jcBG2r3CZwSwQ4fCewXAhAhqGVpP",
+            "Satoshi",
+            "6PYLtMnXvfG3oJde97zRyLYFZCYizPU5T3LwgdYJz1fRhh16bU7u6PPmY7",
+            "KwYgW8gcxj1JWJXhPSu4Fqwzfhp5Yfi42mdYmMa4XqK7NJxXUSK7",
         ];
 
         use hex::FromHex;
@@ -159,7 +167,7 @@ mod tests {
         );
 
         for data in TEST_DATA.chunks(3) {
-            let (pwd, wif, enc_wif) = (data[0], data[1], data[2]);
+            let (pwd, enc_wif, wif) = (data[0], data[1], data[2]);
 
             let prvk = PrivateKey::from_wif(wif).expect("Failed to parse WIF");
             let encrypted = prvk.encrypt_non_ec(pwd).expect("Encryption failed");
