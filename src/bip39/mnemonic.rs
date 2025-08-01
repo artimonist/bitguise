@@ -76,6 +76,14 @@ impl Mnemonic {
         self.language.indices(self.words.iter()).unwrap()[..self.words.len()].to_vec()
     }
 
+    #[inline]
+    pub fn entropy(&self) -> Vec<u8> {
+        let indices = self.indices();
+        let mut entropy: Vec<u8> = Vec::from_bits_chunk(indices.into_iter(), 11);
+        entropy.pop(); // remove checksum
+        entropy
+    }
+
     pub fn detect_language<T>(words: impl Iterator<Item = T>) -> Vec<Language>
     where
         T: AsRef<str>,
