@@ -132,3 +132,41 @@ impl Sha256N for [u8] {
         hash
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_non_ec() {
+        let TEST_DATA = [
+            "TestingOneTwoThree",
+            "5KN7MzqK5wt2TP1fQCYyHBtDrXdJuXbUzm4A9rKAteGu3Qi5CVR",
+            "6PRVWUbkzzsbcVac2qwfssoUJAN1Xhrg6bNk8J7Nzm5H7kxEbn2Nh2ZoGg",
+            "Satoshi",
+            "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi5",
+            "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq",
+            "ϓ\0𐐀💩",
+            "5Jajm8eQ22H3pGWLEVCXyvND8dQZhiQhoLJNKjYXk9roUFTMSZ4",
+            "6PRW5o9FLp4gJDDVqJQKJFTpMvdsSGJxMYHtHaQBF3ooa8mwD69bapcDQn",
+        ];
+
+        use hex::FromHex;
+        assert_eq!("ϓ\0𐐀💩", "\u{03D2}\u{0301}\u{0000}\u{010400}\u{01F4A9}");
+        assert_eq!(
+            "ϓ\0𐐀💩".nfc().collect::<String>().as_bytes(),
+            Vec::from_hex("cf9300f0909080f09f92a9").unwrap()
+        );
+
+        for data in TEST_DATA.chunks(3) {
+            let (pwd, wif, enc_wif) = (data[0], data[1], data[2]);
+
+            let prvk = PrivateKey::from_wif(wif).expect("Failed to parse WIF");
+            let encrypted = prvk.encrypt_non_ec(pwd).expect("Encryption failed");
+            assert_eq!(encrypted, *enc_wif, "Encryption mismatch");
+
+            let decrypted = PrivateKey::decrypt_non_ec(&encrypted, pwd).expect("Decryption failed");
+            assert_eq!(decrypted.to_wif(), *wif, "Decryption mismatch");
+        }
+    }
+}
