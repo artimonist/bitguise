@@ -1,9 +1,13 @@
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArray};
 use bitcoin::{Address, NetworkKind, PrivateKey, base58, secp256k1::Secp256k1};
+use rand::RngCore;
 use unicode_normalization::UnicodeNormalization;
 
 /// Prefix of all non ec encrypted keys.
 const PRE_NON_EC: [u8; 2] = [0x01, 0x42];
+
+/// Prefix of all ec encrypted keys.
+const PRE_EC: [u8; 2] = [0x01, 0x43];
 
 /// BIP38 trait for encrypting and decrypting private keys.
 /// # Reference
@@ -13,6 +17,22 @@ const PRE_NON_EC: [u8; 2] = [0x01, 0x42];
 pub trait Bip38 {
     fn encrypt_non_ec(&self, passphrase: &str) -> Result<String, Bip38Error>;
     fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<PrivateKey, Bip38Error>;
+
+    /// Generates a 64-byte pass factor for EC multiplication.
+    /// # Arguments
+    /// * `passphrase` - The passphrase used to derive the key.
+    /// * `lot` - The lot number, which should be between 100000 and 999999.
+    /// * `seq` - The sequence number, which should be between 1 and 4095.
+    /// * if `lot` and `seq` are both zero, a random salt is generated.
+    /// # Reference
+    /// > The "lot" and "sequence" number are combined into a single 32 bit number.
+    /// > 20 bits are used for the lot number and 12 bits are used for the sequence number,
+    /// > such that the lot number can be any decimal number between 0 and 1048575,
+    /// > and the sequence number can be any decimal number between 0 and 4095.
+    /// > For programs that generate batches of intermediate codes for an owner,
+    /// > it is recommended that lot numbers be chosen at random within the range 100000-999999
+    /// > and that sequence numbers are assigned starting with 1.
+    fn generate_ec_pass(passphrase: &str, lot: u32, seq: u32) -> Result<String, Bip38Error>;
 }
 
 impl Bip38 for PrivateKey {
@@ -96,6 +116,62 @@ impl Bip38 for PrivateKey {
         }
         Ok(prvk)
     }
+
+    fn generate_ec_pass(passphrase: &str, lot: u32, seq: u32) -> Result<String, Bip38Error> {
+        match (lot, seq) {
+            (100000..=999999, 1..=4095) => {
+                let salt: [u8; 4] = rand::thread_rng().next_u32().to_be_bytes();
+                let mut entropy: [u8; 8] = [0; 8];
+                entropy[..4].copy_from_slice(&salt);
+                entropy[4..].copy_from_slice(&(lot << 12 | seq).to_be_bytes());
+
+                let pass_factor = {
+                    let pass = passphrase.nfc().collect::<String>();
+                    let params = scrypt::Params::new(14, 8, 8, 32)?;
+                    let mut pre_factor = [0u8; 32];
+                    scrypt::scrypt(pass.as_bytes(), &salt, &params, &mut pre_factor)?;
+
+                    [&pre_factor[..32], &entropy[..8]].concat().sha256_n(2)
+                };
+                let pass_point = PrivateKey::from_slice(&pass_factor, NetworkKind::Main)?
+                    .public_key(&Secp256k1::default())
+                    .to_bytes();
+                debug_assert_eq!(pass_point.len(), 33);
+
+                let ec_pass = [
+                    &[0x2C, 0xE9, 0xB3, 0xE1, 0xFF, 0x39, 0xE2, 0x51][..8],
+                    &entropy[..8],
+                    &pass_point[..33],
+                ]
+                .concat();
+                Ok(base58::encode_check(&ec_pass))
+            }
+            (0, 0) => {
+                let entropy: [u8; 8] = rand::thread_rng().next_u64().to_be_bytes();
+                let mut pass_factor = [0u8; 32];
+                {
+                    let pass = passphrase.nfc().collect::<String>();
+                    let params = scrypt::Params::new(14, 8, 8, 32)?;
+                    scrypt::scrypt(pass.as_bytes(), &entropy, &params, &mut pass_factor)?;
+                }
+                let pass_point = PrivateKey::from_slice(&pass_factor, NetworkKind::Main)?
+                    .public_key(&Secp256k1::default())
+                    .to_bytes();
+                debug_assert_eq!(pass_point.len(), 33);
+
+                let ec_pass: Vec<u8> = [
+                    &[0x2C, 0xE9, 0xB3, 0xE1, 0xFF, 0x39, 0xE2, 0x53][..8],
+                    &entropy[..8],
+                    &pass_point[..33],
+                ]
+                .concat();
+                Ok(base58::encode_check(&ec_pass))
+            }
+            _ => {
+                return Err(Bip38Error::InvalidEcNumber(lot as u32, seq as u32));
+            }
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -104,6 +180,8 @@ pub enum Bip38Error {
     InvalidKey,
     #[error("Invalid passphrase or checksum mismatch")]
     InvalidChecksum,
+    #[error("Invalid lot or sequence number: lot: {0}, seq: {1}")]
+    InvalidEcNumber(u32, u32),
     #[error("Scrypt error: {0}")]
     ScryptOutput(#[from] scrypt::errors::InvalidOutputLen),
     #[error("Scrypt error: {0}")]
