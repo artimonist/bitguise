@@ -112,7 +112,7 @@ impl Bip38NonEc for PrivateKey {
 
 trait EcMultiply {
     /// Generates a 64-byte pass factor for EC multiplication.
-    fn generate_ec_pass(self, salt: [u8; 4], lot: u32, seq: u32) -> Result<String, Bip38Error>;
+    fn generate_ec_pass(self, salt: [u8; 8], lot: u32, seq: u32) -> Result<String, Bip38Error>;
 
     fn generate_ec_key(seed: [u8; 24], ec_pass_factor: &str) -> Result<String, Bip38Error>;
 
@@ -120,12 +120,15 @@ trait EcMultiply {
 }
 
 impl EcMultiply for &str {
-    fn generate_ec_pass(self, salt: [u8; 4], lot: u32, seq: u32) -> Result<String, Bip38Error> {
+    fn generate_ec_pass(self, salt: [u8; 8], lot: u32, seq: u32) -> Result<String, Bip38Error> {
         match (lot, seq) {
             (100000..=999999, 1..=4095) => {
+                let salt = salt[..4].to_vec();
+
                 let mut entropy: [u8; 8] = [0; 8];
-                entropy[..4].copy_from_slice(&salt);
+                entropy[..4].copy_from_slice(&salt[..4]);
                 entropy[4..].copy_from_slice(&(lot << 12 | seq).to_be_bytes());
+                println!("entropy: {entropy:x?}");
 
                 let pass_factor = {
                     let pass = self.nfc().collect::<String>();
@@ -144,7 +147,7 @@ impl EcMultiply for &str {
                 Ok(base58::encode_check(&ec_pass))
             }
             (0, 0) => {
-                let entropy: [u8; 8] = rand::thread_rng().next_u64().to_be_bytes();
+                let entropy: [u8; 8] = salt;
                 let mut pass_factor = [0u8; 32];
                 {
                     let pass = self.nfc().collect::<String>();
@@ -267,7 +270,7 @@ impl Bip38 for &str {
     }
 
     fn bip38_ec_factor(passphrase: &str, lot: u32, seq: u32) -> Result<String, Bip38Error> {
-        let mut salt = [0u8; 4];
+        let mut salt = [0u8; 8];
         rand::thread_rng().fill_bytes(&mut salt);
         passphrase.generate_ec_pass(salt, lot, seq)
     }
@@ -326,8 +329,6 @@ impl Sha256N for [u8] {
 
 #[cfg(test)]
 mod tests {
-    use hex::ToHex;
-
     use super::*;
 
     #[test]
@@ -374,14 +375,24 @@ mod tests {
     #[test]
     fn test_ec_pass() -> Result<(), anyhow::Error> {
         const TEST_DATA: &[&str] = &[
+            "TestingOneTwoThree",
+            "passphrasepxFy57B9v8HtUsszJYKReoNDV6VHjUSGt8EVJmux9n1J3Ltf1gRxyDGXqnf9qm",
+            "A50DBA6772CB9383",
+            "0",
+            "0",
+            "Satoshi",
+            "passphraseoRDGAXTWzbp72eVbtUDdn1rwpgPUGjNZEc6CGBo8i5EC1FPW8wcnLdq4ThKzAS",
+            "67010A9573418906",
+            "0",
+            "0",
             "MOLON LABE",
             "passphraseaB8feaLQDENqCgr4gKZpmf4VoaT6qdjJNJiv7fsKvjqavcJxvuR1hy25aTu5sX",
-            "4FCA5A97",
+            "4FCA5A9700000000",
             "263183",
             "1",
             "ΜΟΛΩΝ ΛΑΒΕ",
             "passphrased3z9rQJHSyBkNBwTRPkUGNVEVrUAcfAXDyRU1V28ie6hNFbqDwbFBvsTK7yWVK",
-            "C40EA76F",
+            "C40EA76F00000000",
             "806938",
             "1",
         ];
@@ -397,7 +408,12 @@ mod tests {
             );
 
             let bs = base58::decode_check(factor)?;
-            assert_eq!(bs[..8], PRE_EC_PASS_SEQ);
+            if lot > 0 || seq > 0 {
+                assert_eq!(bs[..8], PRE_EC_PASS_SEQ);
+            } else {
+                assert_eq!(bs[..8], PRE_EC_PASS_NON);
+            }
+            println!("salt: {:x?}", &bs[8..16]);
 
             let ec_pass = pass.generate_ec_pass(salt, lot, seq)?;
             assert_eq!(ec_pass, factor);
