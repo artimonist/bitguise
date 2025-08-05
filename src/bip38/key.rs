@@ -252,8 +252,8 @@ impl EcMultiply for &str {
 pub trait Bip38 {
     fn bip38_encrypt(&self, passphrase: &str) -> Result<String, Bip38Error>;
     fn bip38_decrypt(&self, passphrase: &str) -> Result<PrivateKey, Bip38Error>;
-    fn bip38_ec_factor(&self, lot: u32, seq: u32) -> Result<String, Bip38Error>;
-    fn bip38_ec_generate(&self) -> Result<String, Bip38Error>;
+    fn bip38_ec_factor(passphrase: &str, lot: u32, seq: u32) -> Result<String, Bip38Error>;
+    fn bip38_ec_generate(pass_factor: &str) -> Result<String, Bip38Error>;
 }
 
 impl Bip38 for &str {
@@ -266,16 +266,16 @@ impl Bip38 for &str {
         PrivateKey::decrypt_non_ec(self, passphrase)
     }
 
-    fn bip38_ec_factor(&self, lot: u32, seq: u32) -> Result<String, Bip38Error> {
+    fn bip38_ec_factor(passphrase: &str, lot: u32, seq: u32) -> Result<String, Bip38Error> {
         let mut salt = [0u8; 4];
         rand::thread_rng().fill_bytes(&mut salt);
-        self.generate_ec_pass(salt, lot, seq)
+        passphrase.generate_ec_pass(salt, lot, seq)
     }
 
-    fn bip38_ec_generate(&self) -> Result<String, Bip38Error> {
+    fn bip38_ec_generate(pass_factor: &str) -> Result<String, Bip38Error> {
         let mut seed = [0u8; 24];
         rand::thread_rng().fill_bytes(&mut seed);
-        Self::generate_ec_key(seed, self)
+        Self::generate_ec_key(seed, pass_factor)
     }
 }
 
@@ -326,6 +326,8 @@ impl Sha256N for [u8] {
 
 #[cfg(test)]
 mod tests {
+    use hex::ToHex;
+
     use super::*;
 
     #[test]
@@ -370,7 +372,36 @@ mod tests {
     }
 
     #[test]
-    fn test_ec() {
-        // let ec_pass = Bip38::generate_ec_pass("TestingOneTwoThree", 100000, 1).unwrap();
+    fn test_ec_pass() -> Result<(), anyhow::Error> {
+        const TEST_DATA: &[&str] = &[
+            "MOLON LABE",
+            "passphraseaB8feaLQDENqCgr4gKZpmf4VoaT6qdjJNJiv7fsKvjqavcJxvuR1hy25aTu5sX",
+            "4FCA5A97",
+            "263183",
+            "1",
+            "ΜΟΛΩΝ ΛΑΒΕ",
+            "passphrased3z9rQJHSyBkNBwTRPkUGNVEVrUAcfAXDyRU1V28ie6hNFbqDwbFBvsTK7yWVK",
+            "C40EA76F",
+            "806938",
+            "1",
+        ];
+
+        use hex::FromHex;
+        for data in TEST_DATA.chunks(5) {
+            let (pass, factor, salt, lot, seq) = (
+                data[0],
+                data[1],
+                Vec::from_hex(data[2])?.try_into().unwrap(),
+                data[3].parse()?,
+                data[4].parse()?,
+            );
+
+            let bs = base58::decode_check(factor)?;
+            assert_eq!(bs[..8], PRE_EC_PASS_SEQ);
+
+            let ec_pass = pass.generate_ec_pass(salt, lot, seq)?;
+            assert_eq!(ec_pass, factor);
+        }
+        Ok(())
     }
 }
