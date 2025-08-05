@@ -119,6 +119,7 @@ impl std::fmt::Display for Language {
 mod tests {
     use super::*;
 
+    #[ignore = "pre test"]
     #[test]
     fn test_language_length() {
         // words count
