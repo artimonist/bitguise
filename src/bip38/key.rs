@@ -10,12 +10,6 @@ const PRE_NON_EC: [u8; 2] = [0x01, 0x42];
 /// Prefix of all ec encrypted keys.
 const PRE_EC: [u8; 2] = [0x01, 0x43];
 
-/// EC_PASS has "lot" and "sequence".
-const PRE_EC_PASS_SEQ: [u8; 8] = [0x2C, 0xE9, 0xB3, 0xE1, 0xFF, 0x39, 0xE2, 0x51];
-
-/// EC_PASS not has "lot" and "sequence".
-const PRE_EC_PASS_NON: [u8; 8] = [0x2C, 0xE9, 0xB3, 0xE1, 0xFF, 0x39, 0xE2, 0x53];
-
 trait Bip38NonEc
 where
     Self: Sized,
@@ -110,17 +104,21 @@ impl Bip38NonEc for PrivateKey {
     }
 }
 
-trait EcMultiply {
-    /// Generates a 64-byte pass factor for EC multiplication.
-    fn generate_ec_pass(self, salt: [u8; 8], lot: u32, seq: u32) -> Result<String, Bip38Error>;
+struct EcMultiply;
 
-    fn generate_ec_key(seed: [u8; 24], ec_pass_factor: &str) -> Result<String, Bip38Error>;
+impl EcMultiply {
+    /// EC_PASS has "lot" and "sequence".
+    const PRE_EC_PASS_SEQ: [u8; 8] = [0x2C, 0xE9, 0xB3, 0xE1, 0xFF, 0x39, 0xE2, 0x51];
 
-    fn decrypt_ec_key(wif_ec_key: &str, passphrase: &str) -> Result<PrivateKey, Bip38Error>;
-}
+    /// EC_PASS not has "lot" and "sequence".
+    const PRE_EC_PASS_NON: [u8; 8] = [0x2C, 0xE9, 0xB3, 0xE1, 0xFF, 0x39, 0xE2, 0x53];
 
-impl EcMultiply for &str {
-    fn generate_ec_pass(self, salt: [u8; 8], lot: u32, seq: u32) -> Result<String, Bip38Error> {
+    fn generate_ec_pass(
+        passphrase: &str,
+        salt: [u8; 8],
+        lot: u32,
+        seq: u32,
+    ) -> Result<String, Bip38Error> {
         match (lot, seq) {
             (100000..=999999, 1..=4095) => {
                 let salt = salt[..4].to_vec();
@@ -130,7 +128,7 @@ impl EcMultiply for &str {
                 entropy[4..].copy_from_slice(&(lot << 12 | seq).to_be_bytes());
 
                 let pass_factor = {
-                    let pass = self.nfc().collect::<String>();
+                    let pass = passphrase.nfc().collect::<String>();
                     let params = scrypt::Params::new(14, 8, 8, 32)?;
                     let mut pre_factor = [0u8; 32];
                     scrypt::scrypt(pass.as_bytes(), &salt, &params, &mut pre_factor)?;
@@ -142,14 +140,19 @@ impl EcMultiply for &str {
                     .to_bytes();
                 debug_assert_eq!(pass_point.len(), 33);
 
-                let ec_pass = [&PRE_EC_PASS_SEQ[..8], &entropy[..8], &pass_point[..33]].concat();
+                let ec_pass = [
+                    &Self::PRE_EC_PASS_SEQ[..8],
+                    &entropy[..8],
+                    &pass_point[..33],
+                ]
+                .concat();
                 Ok(base58::encode_check(&ec_pass))
             }
             (0, 0) => {
                 let entropy: [u8; 8] = salt;
                 let mut pass_factor = [0u8; 32];
                 {
-                    let pass = self.nfc().collect::<String>();
+                    let pass = passphrase.nfc().collect::<String>();
                     let params = scrypt::Params::new(14, 8, 8, 32)?;
                     scrypt::scrypt(pass.as_bytes(), &entropy, &params, &mut pass_factor)?;
                 }
@@ -158,8 +161,12 @@ impl EcMultiply for &str {
                     .to_bytes();
                 debug_assert_eq!(pass_point.len(), 33);
 
-                let ec_pass: Vec<u8> =
-                    [&PRE_EC_PASS_NON[..8], &entropy[..8], &pass_point[..33]].concat();
+                let ec_pass: Vec<u8> = [
+                    &Self::PRE_EC_PASS_NON[..8],
+                    &entropy[..8],
+                    &pass_point[..33],
+                ]
+                .concat();
                 Ok(base58::encode_check(&ec_pass))
             }
             _ => Err(Bip38Error::InvalidEcNumber(lot, seq)),
@@ -170,8 +177,8 @@ impl EcMultiply for &str {
         let compressed = true;
         let ec_pass = base58::decode_check(ec_pass)?;
         let lot_seq = match &ec_pass[..8] {
-            v if v == PRE_EC_PASS_SEQ => true,
-            v if v == PRE_EC_PASS_NON => false,
+            v if v == Self::PRE_EC_PASS_SEQ => true,
+            v if v == Self::PRE_EC_PASS_NON => false,
             _ => return Err(Bip38Error::InvalidFactor),
         };
         let entropy = &ec_pass[8..16];
@@ -248,12 +255,12 @@ impl EcMultiply for &str {
 
         let mut seed = [0u8; 64];
         {
-            let pass_point = {
+            let pass_point: [u8; 33] = {
                 let secp_pub = secp256k1::PublicKey::from_secret_key(
                     &Secp256k1::default(),
                     &secp256k1::SecretKey::from_slice(&pass_factor)?,
                 );
-                secp_pub.serialize().to_vec()
+                secp_pub.serialize()
             };
             let salt = [&address_hash[..4], &entropy[..8]].concat();
             let params = scrypt::Params::new(10, 1, 1, 64)?;
@@ -306,11 +313,11 @@ impl EcMultiply for &str {
 pub trait Bip38 {
     fn bip38_encrypt(&self, passphrase: &str) -> Result<String, Bip38Error>;
     fn bip38_decrypt(&self, passphrase: &str) -> Result<String, Bip38Error>;
-    fn bip38_ec_factor(passphrase: &str, lot: u32, seq: u32) -> Result<String, Bip38Error>;
-    fn bip38_ec_generate(pass_factor: &str) -> Result<String, Bip38Error>;
+    fn bip38_ec_factor(&self, lot: u32, seq: u32) -> Result<String, Bip38Error>;
+    fn bip38_ec_generate(&self) -> Result<String, Bip38Error>;
 }
 
-impl Bip38 for &str {
+impl Bip38 for str {
     fn bip38_encrypt(&self, passphrase: &str) -> Result<String, Bip38Error> {
         let prvk = PrivateKey::from_wif(self)?;
         prvk.encrypt_non_ec(passphrase)
@@ -323,23 +330,23 @@ impl Bip38 for &str {
                 let prvk = PrivateKey::decrypt_non_ec(self, passphrase)?;
                 return Ok(prvk.to_wif());
             } else if pre == PRE_EC {
-                let prvk = <&str as EcMultiply>::decrypt_ec_key(self, passphrase)?;
+                let prvk = EcMultiply::decrypt_ec_key(self, passphrase)?;
                 return Ok(prvk.to_wif());
             }
         }
         Err(Bip38Error::InvalidKey)
     }
 
-    fn bip38_ec_factor(passphrase: &str, lot: u32, seq: u32) -> Result<String, Bip38Error> {
+    fn bip38_ec_factor(&self, lot: u32, seq: u32) -> Result<String, Bip38Error> {
         let mut salt = [0u8; 8];
         rand::thread_rng().fill_bytes(&mut salt);
-        passphrase.generate_ec_pass(salt, lot, seq)
+        EcMultiply::generate_ec_pass(self, salt, lot, seq)
     }
 
-    fn bip38_ec_generate(pass_factor: &str) -> Result<String, Bip38Error> {
+    fn bip38_ec_generate(&self) -> Result<String, Bip38Error> {
         let mut seed = [0u8; 24];
         rand::thread_rng().fill_bytes(&mut seed);
-        Self::generate_ec_key(seed, pass_factor)
+        EcMultiply::generate_ec_key(seed, self)
     }
 }
 
@@ -474,13 +481,13 @@ mod tests {
 
             let bs = base58::decode_check(factor)?;
             if lot > 0 || seq > 0 {
-                assert_eq!(bs[..8], PRE_EC_PASS_SEQ);
+                assert_eq!(bs[..8], EcMultiply::PRE_EC_PASS_SEQ);
             } else {
-                assert_eq!(bs[..8], PRE_EC_PASS_NON);
+                assert_eq!(bs[..8], EcMultiply::PRE_EC_PASS_NON);
             }
             println!("salt: {:x?}", &bs[8..16]);
 
-            let ec_pass = pass.generate_ec_pass(salt, lot, seq)?;
+            let ec_pass = EcMultiply::generate_ec_pass(pass, salt, lot, seq)?;
             assert_eq!(ec_pass, factor);
         }
         Ok(())
@@ -507,6 +514,53 @@ mod tests {
         for data in TEST_DATA.chunks(6) {
             let (pass, wif, pk) = (data[0], data[1], data[2]);
             assert_eq!(wif.bip38_decrypt(pass)?, pk);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_ec_generate() -> Result<(), anyhow::Error> {
+        const TEST_DATA: &[&str] = &[
+            // EC multiply, no compression, no lot/sequence numbers
+            "69b14acff7bf5b659d43f73f9274631308ee405700fc8585",
+            "passphrasepxFy57B9v8HtUsszJYKReoNDV6VHjUSGt8EVJmux9n1J3Ltf1gRxyDGXqnf9qm",
+            "6PnUPcXkiq1Ht3yaVTuCSBxEhAqJguPGyQQbCBz2Vg6LfiKdfTdmY9sPiL",
+            "69b14acff7bf5b659d43f73f9274631308ee405700fc8585",
+            "passphraseoRDGAXTWzbp72eVbtUDdn1rwpgPUGjNZEc6CGBo8i5EC1FPW8wcnLdq4ThKzAS",
+            "6PnP4qjWDqJkeh6eHFkGyAPNofTTaYBsPDrEod8kG1soUu7jPpvoAVJPYr",
+            // EC multiply, no compression, lot/sequence numbers
+            "69b14acff7bf5b659d43f73f9274631308ee405700fc8585",
+            "passphraseaB8feaLQDENqCgr4gKZpmf4VoaT6qdjJNJiv7fsKvjqavcJxvuR1hy25aTu5sX",
+            "6Q2Yf84ApjSoymHgpHyoaa1wgerDAvtp5XXoVc2KE65BQt5WPzMnjWDN9E",
+            "69b14acff7bf5b659d43f73f9274631308ee405700fc8585",
+            "passphrased3z9rQJHSyBkNBwTRPkUGNVEVrUAcfAXDyRU1V28ie6hNFbqDwbFBvsTK7yWVK",
+            "6Q2a23aHp9ggjNXHaBRnapfViMprg7aKBQVG2gc2D2m6ceeWiKAfnMtd25",
+        ];
+        for data in TEST_DATA.chunks(3) {
+            let (seed, factor, wif) = (hex::decode(data[0])?.try_into().unwrap(), data[1], data[2]);
+            let ec_key = EcMultiply::generate_ec_key(seed, factor)?;
+            assert_eq!(ec_key, wif);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_ec() -> Result<(), anyhow::Error> {
+        const TEST_DATA: &[&str] = &[
+            "TestingOneTwoThree",
+            "Satoshi",
+            "MOLON LABE",
+            "ΜΟΛΩΝ ΛΑΒΕ",
+            "バンドメイド",
+        ];
+        for passphrase in TEST_DATA {
+            assert!(
+                passphrase
+                    .bip38_ec_factor(0, 0)?
+                    .bip38_ec_generate()?
+                    .bip38_decrypt(passphrase)
+                    .is_ok()
+            );
         }
         Ok(())
     }
