@@ -223,7 +223,7 @@ impl EcMultiply for &str {
         if eprvk[..2] != PRE_EC {
             return Err(Bip38Error::InvalidKey);
         }
-        let (compressed, lot_seq) = (eprvk[2] & 0x20 == 0x20, eprvk[2] & 0x40 == 0x40);
+        let (compressed, lot_seq) = (eprvk[2] & 0x20 == 0x20, eprvk[2] & 0x04 == 0x04);
         let address_hash: [u8; 4] = eprvk[3..7].try_into().unwrap();
         let entropy: [u8; 8] = eprvk[7..15].try_into().unwrap();
         let encrypted_part1: [u8; 8] = eprvk[15..23].try_into().unwrap();
@@ -258,6 +258,8 @@ impl EcMultiply for &str {
             let salt = [&address_hash[..4], &entropy[..8]].concat();
             let params = scrypt::Params::new(10, 1, 1, 64)?;
             scrypt::scrypt(&pass_point, &salt, &params, &mut seed)?;
+            println!("pass_point: {:x?}", &pass_point);
+            println!("salt: {:x?}", &salt);
         }
 
         let (half1, half2) = seed.split_at_mut(32);
@@ -493,28 +495,20 @@ mod tests {
             "TestingOneTwoThree",
             "6PfQu77ygVyJLZjfvMLyhLMQbYnu5uguoJJ4kMCLqWwPEdfpwANVS76gTX",
             "5K4caxezwjGCGfnoPTZ8tMcJBLB7Jvyjv4xxeacadhq8nLisLR2",
-            // "Satoshi",
-            // "6PfLGnQs6VZnrNpmVKfjotbnQuaJK4KZoPFrAjx1JMJUa1Ft8gnf5WxfKd",
-            // "5KJ51SgxWaAYR13zd9ReMhJpwrcX47xTJh2D3fGPG9CM8vkv5sH",
-            // // EC multiply, no compression, lot/sequence numbers
-            // "MOLON LABE",
-            // "6PgNBNNzDkKdhkT6uJntUXwwzQV8Rr2tZcbkDcuC9DZRsS6AtHts4Ypo1j",
-            // "5JLdxTtcTHcfYcmJsNVy1v2PMDx432JPoYcBTVVRHpPaxUrdtf8",
-            // "ΜΟΛΩΝ ΛΑΒΕ",
-            // "6PgGWtx25kUg8QWvwuJAgorN6k9FbE25rv5dMRwu5SKMnfpfVe5mar2ngH",
-            // "5KMKKuUmAkiNbA3DazMQiLfDq47qs8MAEThm4yL8R2PhV1ov33D",
+            "Satoshi",
+            "6PfLGnQs6VZnrNpmVKfjotbnQuaJK4KZoPFrAjx1JMJUa1Ft8gnf5WxfKd",
+            "5KJ51SgxWaAYR13zd9ReMhJpwrcX47xTJh2D3fGPG9CM8vkv5sH",
+            // EC multiply, no compression, lot/sequence numbers
+            "MOLON LABE",
+            "6PgNBNNzDkKdhkT6uJntUXwwzQV8Rr2tZcbkDcuC9DZRsS6AtHts4Ypo1j",
+            "5JLdxTtcTHcfYcmJsNVy1v2PMDx432JPoYcBTVVRHpPaxUrdtf8",
+            "ΜΟΛΩΝ ΛΑΒΕ",
+            "6PgGWtx25kUg8QWvwuJAgorN6k9FbE25rv5dMRwu5SKMnfpfVe5mar2ngH",
+            "5KMKKuUmAkiNbA3DazMQiLfDq47qs8MAEThm4yL8R2PhV1ov33D",
         ];
         for data in TEST_DATA.chunks(6) {
             let (pass, wif, pk) = (data[0], data[1], data[2]);
-
             assert_eq!(wif.bip38_decrypt(pass)?, pk);
-            // let ec_pass = pass.generate_ec_pass(salt, lot, seq)?;
-            // assert_eq!(ec_pass, factor);
-
-            // let ekey = <&str as EcMultiply>::generate_ec_key([0u8; 24], &ec_pass)?;
-            // println!("ekey: {ekey}");
-            // let decrypted = <&str as EcMultiply>::decrypt_ec_key(&ekey, pass)?;
-            // assert_eq!(decrypted.to_wif(), *wif, "Decryption mismatch");
         }
         Ok(())
     }
