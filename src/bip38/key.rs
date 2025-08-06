@@ -258,13 +258,11 @@ impl EcMultiply for &str {
             let salt = [&address_hash[..4], &entropy[..8]].concat();
             let params = scrypt::Params::new(10, 1, 1, 64)?;
             scrypt::scrypt(&pass_point, &salt, &params, &mut seed)?;
-            println!("pass_point: {:x?}", &pass_point);
-            println!("salt: {:x?}", &salt);
         }
 
-        let (half1, half2) = seed.split_at_mut(32);
-        let (part1, part2) = half1.split_at_mut(16);
         let factor: [u8; 32] = {
+            let (half1, half2) = seed.split_at_mut(32);
+            let (part1, part2) = half1.split_at_mut(16);
             let cipher = aes::Aes256::new(GenericArray::from_mut_slice(half2));
 
             let mut tmp2 = encrypted_part2;
