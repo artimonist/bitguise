@@ -18,7 +18,7 @@ where
     fn encrypt_non_ec(&self, passphrase: &str) -> Result<String, Bip38Error>;
 
     /// Decrypts a non-EC private key using BIP38.
-    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<PrivateKey, Bip38Error>;
+    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<Self, Bip38Error>;
 }
 
 impl Bip38NonEc for PrivateKey {
@@ -61,7 +61,7 @@ impl Bip38NonEc for PrivateKey {
         Ok(base58::encode_check(&buffer))
     }
 
-    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<PrivateKey, Bip38Error> {
+    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<Self, Bip38Error> {
         let mut ebuffer = base58::decode_check(wif)?;
         if ebuffer.len() != 39 || ebuffer[..2] != PRE_NON_EC {
             return Err(Bip38Error::InvalidKey);
@@ -84,10 +84,8 @@ impl Bip38NonEc for PrivateKey {
         cipher.decrypt_block(GenericArray::from_mut_slice(part2));
 
         // XOR the decrypted parts with the first half of the scrypt key
-        half1
-            .iter_mut()
-            .zip(part1.iter().chain(part2.iter()))
-            .for_each(|(x, y)| *x ^= y);
+        (0..16).for_each(|i| half1[i] ^= part1[i]);
+        (0..16).for_each(|i| half1[i + 16] ^= part2[i]);
 
         let mut prvk = PrivateKey::from_slice(half1, NetworkKind::Main)?;
         prvk.compressed = compress;
@@ -97,7 +95,7 @@ impl Bip38NonEc for PrivateKey {
             let address = Address::p2pkh(pub_key, NetworkKind::Main).to_string();
             let checksum = address.as_bytes().sha256_n(2)[..4].to_vec();
             if checksum != *salt {
-                return Err(Bip38Error::InvalidChecksum);
+                return Err(Bip38Error::InvalidPassphrase);
             }
         }
         Ok(prvk)
@@ -179,7 +177,7 @@ impl EcMultiply {
         let lot_seq = match &ec_pass[..8] {
             v if v == Self::PRE_EC_PASS_SEQ => true,
             v if v == Self::PRE_EC_PASS_NON => false,
-            _ => return Err(Bip38Error::InvalidFactor),
+            _ => return Err(Bip38Error::InvalidEcFactor),
         };
         let entropy = &ec_pass[8..16];
         let pass_point = &ec_pass[16..49];
@@ -354,31 +352,34 @@ impl Bip38 for str {
 pub enum Bip38Error {
     #[error("Invalid BIP38 encrypted key")]
     InvalidKey,
-    #[error("Invalid passphrase or checksum mismatch")]
-    InvalidChecksum,
+    #[error("Invalid passphrase")]
+    InvalidPassphrase,
     #[error("Invalid lot or sequence number: lot: {0}, seq: {1}")]
     InvalidEcNumber(u32, u32),
     #[error("Invalid ec passphrase")]
-    InvalidFactor,
-    #[error("Invalid passphrase")]
-    InvalidPassphrase,
-    #[error("Scrypt error: {0}")]
-    ScryptOutput(#[from] scrypt::errors::InvalidOutputLen),
-    #[error("Scrypt error: {0}")]
-    ScryptParams(#[from] scrypt::errors::InvalidParams),
-    #[error("AES error: {0}")]
-    AesError(#[from] aes::cipher::InvalidLength),
+    InvalidEcFactor,
     #[error("Base58 error: {0}")]
     Base58Error(#[from] bitcoin::base58::Error),
-    #[error("Invalid private key: {0}")]
-    InvalidPrivateKey(#[from] bitcoin::secp256k1::Error),
-    #[error("Invalid public key: {0}")]
-    InvalidPublicKey(#[from] bitcoin::key::FromSliceError),
     #[error("Invalid WIF: {0}")]
     InvalidWif(#[from] bitcoin::key::FromWifError),
-    #[error("Scalar error: {0}")]
-    ScalarError(#[from] bitcoin::secp256k1::scalar::OutOfRangeError),
+    #[error("Inner error: {0}")]
+    InnerError(String),
 }
+
+macro_rules! derive_error {
+    ($e:expr, $source:ty) => {
+        impl From<$source> for Bip38Error {
+            fn from(e: $source) -> Self {
+                $e(e.to_string())
+            }
+        }
+    };
+}
+derive_error!(Bip38Error::InnerError, aes::cipher::InvalidLength);
+derive_error!(Bip38Error::InnerError, scrypt::errors::InvalidOutputLen);
+derive_error!(Bip38Error::InnerError, scrypt::errors::InvalidParams);
+derive_error!(Bip38Error::InnerError, bitcoin::secp256k1::Error);
+derive_error!(Bip38Error::InnerError, secp256k1::scalar::OutOfRangeError);
 
 trait Sha256N {
     fn sha256_n(&self, n: usize) -> [u8; 32];
