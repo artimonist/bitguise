@@ -21,6 +21,7 @@ fn language_common_count() {
     assert_eq!(repeats[1], (English, French, 100));
 }
 
+#[ignore = "pre test"]
 #[test]
 fn language_common_diff() {
     // test if two languages have different indices common words

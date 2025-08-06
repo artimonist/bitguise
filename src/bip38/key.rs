@@ -24,7 +24,7 @@ where
     fn encrypt_non_ec(&self, passphrase: &str) -> Result<String, Bip38Error>;
 
     /// Decrypts a non-EC private key using BIP38.
-    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<Self, Bip38Error>;
+    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<PrivateKey, Bip38Error>;
 }
 
 impl Bip38NonEc for PrivateKey {
@@ -67,7 +67,7 @@ impl Bip38NonEc for PrivateKey {
         Ok(base58::encode_check(&buffer))
     }
 
-    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<Self, Bip38Error> {
+    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<PrivateKey, Bip38Error> {
         let mut ebuffer = base58::decode_check(wif)?;
         if ebuffer.len() != 39 || ebuffer[..2] != PRE_NON_EC {
             return Err(Bip38Error::InvalidKey);
@@ -128,7 +128,6 @@ impl EcMultiply for &str {
                 let mut entropy: [u8; 8] = [0; 8];
                 entropy[..4].copy_from_slice(&salt[..4]);
                 entropy[4..].copy_from_slice(&(lot << 12 | seq).to_be_bytes());
-                println!("entropy: {entropy:x?}");
 
                 let pass_factor = {
                     let pass = self.nfc().collect::<String>();
@@ -180,11 +179,11 @@ impl EcMultiply for &str {
 
         let factor = seed.sha256_n(2);
         let address_hash = {
-            let pub_key = secp256k1::PublicKey::from_slice(pass_point)?.mul_tweak(
+            let secp_pub = secp256k1::PublicKey::from_slice(pass_point)?.mul_tweak(
                 &Secp256k1::default(),
                 &secp256k1::Scalar::from_be_bytes(factor)?,
             )?;
-            let addr = Address::p2wpkh(&CompressedPublicKey(pub_key), Network::Bitcoin).to_string();
+            let addr = Address::p2pkh(&CompressedPublicKey(secp_pub), Network::Bitcoin).to_string();
             addr.as_bytes().sha256_n(2)[0..4].to_vec()
         };
 
@@ -250,11 +249,11 @@ impl EcMultiply for &str {
         let mut seed = [0u8; 64];
         {
             let pass_point = {
-                // let mut pub_key = secp256k1::PublicKey::from_slice(pass_point)?;
-                // pub_key = pub_key.mul_tweak(&Secp256k1::default(), &Scalar::from_be_bytes(factor)?)?;
-                // let addr = Address::p2pkh(PublicKey::new(pub_key), NetworkKind::Main).to_string();
-                // addr.as_bytes().sha256_n(2)[0..4].to_vec()
-                [0u8; 32]
+                let secp_pub = secp256k1::PublicKey::from_secret_key(
+                    &Secp256k1::default(),
+                    &secp256k1::SecretKey::from_slice(&pass_factor)?,
+                );
+                secp_pub.serialize().to_vec()
             };
             let salt = [&address_hash[..4], &entropy[..8]].concat();
             let params = scrypt::Params::new(10, 1, 1, 64)?;
@@ -279,18 +278,17 @@ impl EcMultiply for &str {
 
         // private key
         let prvk = {
-            let inner = secp256k1::SecretKey::from_slice(&pass_factor)?
+            let prv = secp256k1::SecretKey::from_slice(&pass_factor)?
                 .mul_tweak(&secp256k1::Scalar::from_be_bytes(factor)?)?;
-            PrivateKey {
-                compressed,
-                network: NetworkKind::Main,
-                inner,
+            match compressed {
+                true => PrivateKey::new(prv, Network::Bitcoin),
+                false => PrivateKey::new_uncompressed(prv, Network::Bitcoin),
             }
         };
         // checksum
         {
-            let pub_key = CompressedPublicKey(prvk.public_key(&Secp256k1::default()).inner);
-            let address = Address::p2wpkh(&pub_key, Network::Bitcoin).to_string();
+            let secp_pub = prvk.public_key(&Secp256k1::default());
+            let address = Address::p2pkh(&secp_pub, Network::Bitcoin).to_string();
             let checksum = &address.as_bytes().sha256_n(2)[..4];
             if checksum != address_hash {
                 return Err(Bip38Error::InvalidPassphrase);
@@ -307,7 +305,7 @@ impl EcMultiply for &str {
 ///  [Implementation](https://github.com/ceca69ec/bip38)
 pub trait Bip38 {
     fn bip38_encrypt(&self, passphrase: &str) -> Result<String, Bip38Error>;
-    fn bip38_decrypt(&self, passphrase: &str) -> Result<PrivateKey, Bip38Error>;
+    fn bip38_decrypt(&self, passphrase: &str) -> Result<String, Bip38Error>;
     fn bip38_ec_factor(passphrase: &str, lot: u32, seq: u32) -> Result<String, Bip38Error>;
     fn bip38_ec_generate(pass_factor: &str) -> Result<String, Bip38Error>;
 }
@@ -318,16 +316,18 @@ impl Bip38 for &str {
         prvk.encrypt_non_ec(passphrase)
     }
 
-    fn bip38_decrypt(&self, passphrase: &str) -> Result<PrivateKey, Bip38Error> {
+    fn bip38_decrypt(&self, passphrase: &str) -> Result<String, Bip38Error> {
         if self.starts_with("6P") && self.len() == 58 {
-            match &base58::decode_check(self)?[..2] {
-                v if v == PRE_NON_EC => Bip38NonEc::decrypt_non_ec(self, passphrase),
-                v if v == PRE_EC => <&str as EcMultiply>::decrypt_ec_key(self, passphrase),
-                _ => Err(Bip38Error::InvalidKey),
+            let pre = base58::decode_check(self)?[..2].to_vec();
+            if pre == PRE_NON_EC {
+                let prvk = PrivateKey::decrypt_non_ec(self, passphrase)?;
+                return Ok(prvk.to_wif());
+            } else if pre == PRE_EC {
+                let prvk = <&str as EcMultiply>::decrypt_ec_key(self, passphrase)?;
+                return Ok(prvk.to_wif());
             }
-        } else {
-            Err(Bip38Error::InvalidKey)
         }
+        Err(Bip38Error::InvalidKey)
     }
 
     fn bip38_ec_factor(passphrase: &str, lot: u32, seq: u32) -> Result<String, Bip38Error> {
@@ -482,6 +482,39 @@ mod tests {
 
             let ec_pass = pass.generate_ec_pass(salt, lot, seq)?;
             assert_eq!(ec_pass, factor);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_ec_decrypt() -> Result<(), anyhow::Error> {
+        const TEST_DATA: &[&str] = &[
+            // EC multiply, no compression, no lot/sequence numbers
+            "TestingOneTwoThree",
+            "6PfQu77ygVyJLZjfvMLyhLMQbYnu5uguoJJ4kMCLqWwPEdfpwANVS76gTX",
+            "5K4caxezwjGCGfnoPTZ8tMcJBLB7Jvyjv4xxeacadhq8nLisLR2",
+            // "Satoshi",
+            // "6PfLGnQs6VZnrNpmVKfjotbnQuaJK4KZoPFrAjx1JMJUa1Ft8gnf5WxfKd",
+            // "5KJ51SgxWaAYR13zd9ReMhJpwrcX47xTJh2D3fGPG9CM8vkv5sH",
+            // // EC multiply, no compression, lot/sequence numbers
+            // "MOLON LABE",
+            // "6PgNBNNzDkKdhkT6uJntUXwwzQV8Rr2tZcbkDcuC9DZRsS6AtHts4Ypo1j",
+            // "5JLdxTtcTHcfYcmJsNVy1v2PMDx432JPoYcBTVVRHpPaxUrdtf8",
+            // "ΜΟΛΩΝ ΛΑΒΕ",
+            // "6PgGWtx25kUg8QWvwuJAgorN6k9FbE25rv5dMRwu5SKMnfpfVe5mar2ngH",
+            // "5KMKKuUmAkiNbA3DazMQiLfDq47qs8MAEThm4yL8R2PhV1ov33D",
+        ];
+        for data in TEST_DATA.chunks(6) {
+            let (pass, wif, pk) = (data[0], data[1], data[2]);
+
+            assert_eq!(wif.bip38_decrypt(pass)?, pk);
+            // let ec_pass = pass.generate_ec_pass(salt, lot, seq)?;
+            // assert_eq!(ec_pass, factor);
+
+            // let ekey = <&str as EcMultiply>::generate_ec_key([0u8; 24], &ec_pass)?;
+            // println!("ekey: {ekey}");
+            // let decrypted = <&str as EcMultiply>::decrypt_ec_key(&ekey, pass)?;
+            // assert_eq!(decrypted.to_wif(), *wif, "Decryption mismatch");
         }
         Ok(())
     }

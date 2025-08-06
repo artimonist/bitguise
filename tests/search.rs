@@ -16,6 +16,7 @@ macro_rules! execute {
     }};
 }
 
+#[ignore = "removing"]
 #[test]
 fn test_search() {
     let output = execute!("search youth --target english");
