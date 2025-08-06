@@ -1,6 +1,6 @@
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArray};
-use bitcoin::secp256k1::{self, Scalar, Secp256k1};
-use bitcoin::{Address, NetworkKind, PrivateKey, PublicKey, base58};
+use bitcoin::secp256k1::{self, Secp256k1};
+use bitcoin::{Address, CompressedPublicKey, Network, NetworkKind, PrivateKey, base58};
 use rand::RngCore;
 use unicode_normalization::UnicodeNormalization;
 
@@ -116,7 +116,7 @@ trait EcMultiply {
 
     fn generate_ec_key(seed: [u8; 24], ec_pass_factor: &str) -> Result<String, Bip38Error>;
 
-    fn decrypt_ec_key(&self, ec_encrypted_key: &str) -> Result<PrivateKey, Bip38Error>;
+    fn decrypt_ec_key(wif_ec_key: &str, passphrase: &str) -> Result<PrivateKey, Bip38Error>;
 }
 
 impl EcMultiply for &str {
@@ -163,87 +163,140 @@ impl EcMultiply for &str {
                     [&PRE_EC_PASS_NON[..8], &entropy[..8], &pass_point[..33]].concat();
                 Ok(base58::encode_check(&ec_pass))
             }
-            _ => {
-                return Err(Bip38Error::InvalidEcNumber(lot, seq));
-            }
+            _ => Err(Bip38Error::InvalidEcNumber(lot, seq)),
         }
     }
 
     fn generate_ec_key(seed: [u8; 24], ec_pass: &str) -> Result<String, Bip38Error> {
+        let compressed = true;
         let ec_pass = base58::decode_check(ec_pass)?;
         let lot_seq = match &ec_pass[..8] {
             v if v == PRE_EC_PASS_SEQ => true,
             v if v == PRE_EC_PASS_NON => false,
-            _ => return Err(Bip38Error::InvalidEcPass),
+            _ => return Err(Bip38Error::InvalidFactor),
         };
         let entropy = &ec_pass[8..16];
         let pass_point = &ec_pass[16..49];
 
         let factor = seed.sha256_n(2);
         let address_hash = {
-            let mut pub_key = secp256k1::PublicKey::from_slice(pass_point)?;
-            pub_key = pub_key.mul_tweak(&Secp256k1::default(), &Scalar::from_be_bytes(factor)?)?;
-            let addr = Address::p2pkh(PublicKey::new(pub_key), NetworkKind::Main).to_string();
+            let pub_key = secp256k1::PublicKey::from_slice(pass_point)?.mul_tweak(
+                &Secp256k1::default(),
+                &secp256k1::Scalar::from_be_bytes(factor)?,
+            )?;
+            let addr = Address::p2wpkh(&CompressedPublicKey(pub_key), Network::Bitcoin).to_string();
             addr.as_bytes().sha256_n(2)[0..4].to_vec()
         };
 
         let mut scrypt_key = [0u8; 64];
         let (half1, half2) = {
-            let salt = [address_hash, entropy.to_vec()].concat();
+            let salt = [&address_hash[..4], &entropy[..8]].concat();
             let params = scrypt::Params::new(10, 1, 1, 64)?;
-            scrypt::scrypt(&pass_point, &salt, &params, &mut scrypt_key)?;
+            scrypt::scrypt(pass_point, &salt, &params, &mut scrypt_key)?;
             scrypt_key.split_at_mut(32)
         };
 
         let cipher = aes::Aes256::new_from_slice(half2)?;
+        let (part1, part2) = half1.split_at_mut(16);
 
-        (0..16).for_each(|idx| half1[idx] ^= seed[idx]);
-        cipher.encrypt_block(&mut GenericArray::from_mut_slice(&mut half1[..16]));
+        (0..16).for_each(|i| part1[i] ^= seed[i]);
+        cipher.encrypt_block(GenericArray::from_mut_slice(part1));
 
-        (0..16).for_each(|idx| {
-            half1[idx + 16] ^= seed[idx + 16];
-        });
+        (0..8).for_each(|i| part2[i] ^= part1[i + 8]);
+        (8..16).for_each(|i| part2[i] ^= seed[i + 8]);
+        cipher.encrypt_block(GenericArray::from_mut_slice(part2));
 
-        // let derived_half1 = &seed_b_pass[..32];
-        // let derived_half2 = &seed_b_pass[32..];
-        // let en_p1 = &mut seed_b[..16];
-
-        // for idx in 0..16 {
-        //     en_p1[idx] ^= derived_half1[idx];
-        // }
-
-        // let cipher = Aes256::new(GenericArray::from_slice(derived_half2));
-        // let mut encrypted_part1 = GenericArray::clone_from_slice(en_p1);
-
-        // cipher.encrypt_block(&mut encrypted_part1);
-
-        // let mut en_p2 = [0x00; 16];
-        // en_p2[..8].copy_from_slice(&encrypted_part1[8..]);
-        // en_p2[8..].copy_from_slice(&seed_b[16..]);
-
-        // for idx in 0..16 {
-        //     en_p2[idx] ^= derived_half1[idx + 16];
-        // }
-
-        // let mut encrypted_part2 = GenericArray::clone_from_slice(&en_p2);
-
-        // cipher.encrypt_block(&mut encrypted_part2);
-
-        // let flag = if compress { 0x20 } else { 0x00 };
-
-        // let mut result_bytes = [0x00; 39];
-        // result_bytes[..2].copy_from_slice(&PRE_EC);
-        // result_bytes[2] = flag;
-        // result_bytes[3..7].copy_from_slice(address_hash);
-        // result_bytes[7..15].copy_from_slice(&owner_salt);
-        // result_bytes[15..23].copy_from_slice(&encrypted_part1[..8]);
-        // result_bytes[23..].copy_from_slice(&encrypted_part2);
-
-        Ok(String::new())
+        let flag = if compressed { 0x20 } else { 0x00 } | if lot_seq { 0x40 } else { 0x00 };
+        let result = [
+            &PRE_EC[..2],
+            &[flag][..1],
+            &address_hash[..4],
+            &entropy[..8],
+            &part1[..8],
+            &part2[..16],
+        ]
+        .concat();
+        Ok(base58::encode_check(&result))
     }
 
-    fn decrypt_ec_key(&self, ec_key: &str) -> Result<PrivateKey, Bip38Error> {
-        todo!()
+    fn decrypt_ec_key(wif_ec_key: &str, passphrase: &str) -> Result<PrivateKey, Bip38Error> {
+        let eprvk = base58::decode_check(wif_ec_key)?;
+        if eprvk[..2] != PRE_EC {
+            return Err(Bip38Error::InvalidKey);
+        }
+        let (compressed, lot_seq) = (eprvk[2] & 0x20 == 0x20, eprvk[2] & 0x40 == 0x40);
+        let address_hash: [u8; 4] = eprvk[3..7].try_into().unwrap();
+        let entropy: [u8; 8] = eprvk[7..15].try_into().unwrap();
+        let encrypted_part1: [u8; 8] = eprvk[15..23].try_into().unwrap();
+        let encrypted_part2: [u8; 16] = eprvk[23..39].try_into().unwrap();
+        let salt = match lot_seq {
+            true => &entropy[..4],
+            false => &entropy[..8],
+        };
+
+        let pass_factor: [u8; 32] = {
+            let mut pre_factor = [0u8; 32];
+            {
+                let pass = passphrase.nfc().collect::<String>();
+                let params = scrypt::Params::new(14, 8, 8, 64)?;
+                scrypt::scrypt(pass.as_bytes(), salt, &params, &mut pre_factor)?;
+            }
+            match lot_seq {
+                true => [&pre_factor[..32], &entropy].concat().sha256_n(2),
+                false => pre_factor,
+            }
+        };
+
+        let mut seed = [0u8; 64];
+        {
+            let pass_point = {
+                // let mut pub_key = secp256k1::PublicKey::from_slice(pass_point)?;
+                // pub_key = pub_key.mul_tweak(&Secp256k1::default(), &Scalar::from_be_bytes(factor)?)?;
+                // let addr = Address::p2pkh(PublicKey::new(pub_key), NetworkKind::Main).to_string();
+                // addr.as_bytes().sha256_n(2)[0..4].to_vec()
+                [0u8; 32]
+            };
+            let salt = [&address_hash[..4], &entropy[..8]].concat();
+            let params = scrypt::Params::new(10, 1, 1, 64)?;
+            scrypt::scrypt(&pass_point, &salt, &params, &mut seed)?;
+        }
+
+        let (half1, half2) = seed.split_at_mut(32);
+        let (part1, part2) = half1.split_at_mut(16);
+        let factor: [u8; 32] = {
+            let cipher = aes::Aes256::new(GenericArray::from_mut_slice(half2));
+
+            let mut tmp2 = encrypted_part2;
+            cipher.decrypt_block(GenericArray::from_mut_slice(&mut tmp2));
+            (0..16).for_each(|i| part2[i] ^= tmp2[i]);
+
+            let mut tmp1 = [&encrypted_part1[..8], &part2[..8]].concat();
+            cipher.decrypt_block(GenericArray::from_mut_slice(&mut tmp1));
+            (0..16).for_each(|i| part1[i] ^= tmp1[i]);
+
+            [&part1[..16], &part2[8..16]].concat().sha256_n(2)
+        };
+
+        // private key
+        let prvk = {
+            let inner = secp256k1::SecretKey::from_slice(&pass_factor)?
+                .mul_tweak(&secp256k1::Scalar::from_be_bytes(factor)?)?;
+            PrivateKey {
+                compressed,
+                network: NetworkKind::Main,
+                inner,
+            }
+        };
+        // checksum
+        {
+            let pub_key = CompressedPublicKey(prvk.public_key(&Secp256k1::default()).inner);
+            let address = Address::p2wpkh(&pub_key, Network::Bitcoin).to_string();
+            let checksum = &address.as_bytes().sha256_n(2)[..4];
+            if checksum != address_hash {
+                return Err(Bip38Error::InvalidPassphrase);
+            }
+        }
+        Ok(prvk)
     }
 }
 
@@ -266,7 +319,15 @@ impl Bip38 for &str {
     }
 
     fn bip38_decrypt(&self, passphrase: &str) -> Result<PrivateKey, Bip38Error> {
-        PrivateKey::decrypt_non_ec(self, passphrase)
+        if self.starts_with("6P") && self.len() == 58 {
+            match &base58::decode_check(self)?[..2] {
+                v if v == PRE_NON_EC => Bip38NonEc::decrypt_non_ec(self, passphrase),
+                v if v == PRE_EC => <&str as EcMultiply>::decrypt_ec_key(self, passphrase),
+                _ => Err(Bip38Error::InvalidKey),
+            }
+        } else {
+            Err(Bip38Error::InvalidKey)
+        }
     }
 
     fn bip38_ec_factor(passphrase: &str, lot: u32, seq: u32) -> Result<String, Bip38Error> {
@@ -291,7 +352,9 @@ pub enum Bip38Error {
     #[error("Invalid lot or sequence number: lot: {0}, seq: {1}")]
     InvalidEcNumber(u32, u32),
     #[error("Invalid ec passphrase")]
-    InvalidEcPass,
+    InvalidFactor,
+    #[error("Invalid passphrase")]
+    InvalidPassphrase,
     #[error("Scrypt error: {0}")]
     ScryptOutput(#[from] scrypt::errors::InvalidOutputLen),
     #[error("Scrypt error: {0}")]
@@ -375,6 +438,7 @@ mod tests {
     #[test]
     fn test_ec_pass() -> Result<(), anyhow::Error> {
         const TEST_DATA: &[&str] = &[
+            //EC multiply, no compression, no lot/sequence numbers
             "TestingOneTwoThree",
             "passphrasepxFy57B9v8HtUsszJYKReoNDV6VHjUSGt8EVJmux9n1J3Ltf1gRxyDGXqnf9qm",
             "A50DBA6772CB9383",
@@ -385,6 +449,7 @@ mod tests {
             "67010A9573418906",
             "0",
             "0",
+            // EC multiply, no compression, lot/sequence numbers
             "MOLON LABE",
             "passphraseaB8feaLQDENqCgr4gKZpmf4VoaT6qdjJNJiv7fsKvjqavcJxvuR1hy25aTu5sX",
             "4FCA5A9700000000",
