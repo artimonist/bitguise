@@ -183,7 +183,7 @@ impl EcMultiply for &str {
                 &Secp256k1::default(),
                 &secp256k1::Scalar::from_be_bytes(factor)?,
             )?;
-            let addr = Address::p2pkh(&CompressedPublicKey(secp_pub), Network::Bitcoin).to_string();
+            let addr = Address::p2pkh(CompressedPublicKey(secp_pub), Network::Bitcoin).to_string();
             addr.as_bytes().sha256_n(2)[0..4].to_vec()
         };
 
@@ -288,7 +288,7 @@ impl EcMultiply for &str {
         // checksum
         {
             let secp_pub = prvk.public_key(&Secp256k1::default());
-            let address = Address::p2pkh(&secp_pub, Network::Bitcoin).to_string();
+            let address = Address::p2pkh(secp_pub, Network::Bitcoin).to_string();
             let checksum = &address.as_bytes().sha256_n(2)[..4];
             if checksum != address_hash {
                 return Err(Bip38Error::InvalidPassphrase);
