@@ -1,6 +1,6 @@
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArray};
-use bitcoin::secp256k1::{self, Secp256k1};
-use bitcoin::{Address, CompressedPublicKey, Network, NetworkKind, PrivateKey, base58};
+use bitcoin::secp256k1::{self, Scalar, Secp256k1};
+use bitcoin::{Address, Network, NetworkKind, PrivateKey, PublicKey, base58};
 use rand::RngCore;
 use unicode_normalization::UnicodeNormalization;
 
@@ -38,7 +38,6 @@ impl Bip38NonEc for PrivateKey {
             let (part1, part2) = half1.split_at_mut(16);
             cipher.encrypt_block(GenericArray::from_mut_slice(part1));
             cipher.encrypt_block(GenericArray::from_mut_slice(part2));
-
             (part1, part2)
         };
 
@@ -72,14 +71,15 @@ impl Bip38NonEc for PrivateKey {
 
         // Decrypt the two parts of the key
         let (half1, half2) = scrypt_key.split_at_mut(32);
-        let cipher = aes::Aes256::new_from_slice(half2)?;
-        cipher.decrypt_block(GenericArray::from_mut_slice(part1));
-        cipher.decrypt_block(GenericArray::from_mut_slice(part2));
+        {
+            let cipher = aes::Aes256::new_from_slice(half2)?;
+            cipher.decrypt_block(GenericArray::from_mut_slice(part1));
+            cipher.decrypt_block(GenericArray::from_mut_slice(part2));
 
-        // XOR the decrypted parts with the first half of the scrypt key
-        half1[..16].xor(&part1[..16]);
-        half1[16..32].xor(&part2[..16]);
-
+            // XOR the decrypted parts with the first half of the scrypt key
+            half1[..16].xor(&part1[..16]);
+            half1[16..32].xor(&part2[..16]);
+        }
         let mut prvk = PrivateKey::from_slice(half1, NetworkKind::Main)?;
         prvk.compressed = compress;
 
@@ -171,33 +171,32 @@ impl EcMultiply {
         let entropy = &ec_pass[8..16];
         let pass_point = &ec_pass[16..49];
 
-        let factor = seed.sha256_n(2);
         let address_hash = {
-            let secp_pub = secp256k1::PublicKey::from_slice(pass_point)?.mul_tweak(
-                &Secp256k1::default(),
-                &secp256k1::Scalar::from_be_bytes(factor)?,
-            )?;
-            let addr = Address::p2pkh(CompressedPublicKey(secp_pub), Network::Bitcoin).to_string();
-            addr.as_bytes().sha256_n(2)[0..4].to_vec()
+            let factor = seed.sha256_n(2);
+            let mut pub_key = PublicKey::from_slice(pass_point)?.mul_tweak(factor)?;
+            pub_key.compressed = true;
+            pub_key.p2pkh()?.as_bytes().sha256_n(2)[0..4].to_vec()
         };
 
         let mut scrypt_key = [0u8; 64];
-        let (half1, half2) = {
+        {
             let salt = [&address_hash[..4], &entropy[..8]].concat();
             let params = scrypt::Params::new(10, 1, 1, 64)?;
             scrypt::scrypt(pass_point, &salt, &params, &mut scrypt_key)?;
-            scrypt_key.split_at_mut(32)
         };
 
-        let cipher = aes::Aes256::new_from_slice(half2)?;
+        let (half1, half2) = scrypt_key.split_at_mut(32);
         let (part1, part2) = half1.split_at_mut(16);
+        {
+            let cipher = aes::Aes256::new_from_slice(half2)?;
 
-        part1[..16].xor(&seed[..16]);
-        cipher.encrypt_block(GenericArray::from_mut_slice(part1));
+            part1[..16].xor(&seed[..16]);
+            cipher.encrypt_block(GenericArray::from_mut_slice(part1));
 
-        part2[..8].xor(&part1[8..16]);
-        part2[8..16].xor(&seed[16..24]);
-        cipher.encrypt_block(GenericArray::from_mut_slice(part2));
+            part2[..8].xor(&part1[8..16]);
+            part2[8..16].xor(&seed[16..24]);
+            cipher.encrypt_block(GenericArray::from_mut_slice(part2));
+        }
 
         let flag = if compressed { 0x20 } else { 0x00 } | if lot_seq { 0x40 } else { 0x00 };
         let result = [
@@ -242,13 +241,9 @@ impl EcMultiply {
 
         let mut seed = [0u8; 64];
         {
-            let pass_point: [u8; 33] = {
-                let secp_pub = secp256k1::PublicKey::from_secret_key(
-                    &Secp256k1::default(),
-                    &secp256k1::SecretKey::from_slice(&pass_factor)?,
-                );
-                secp_pub.serialize()
-            };
+            let pass_point = PrivateKey::from_slice(&pass_factor, Network::Bitcoin)?
+                .public_key(&Secp256k1::default())
+                .to_bytes();
             let salt = [&address_hash[..4], &entropy[..8]].concat();
             let params = scrypt::Params::new(10, 1, 1, 64)?;
             scrypt::scrypt(&pass_point, &salt, &params, &mut seed)?;
@@ -271,14 +266,8 @@ impl EcMultiply {
         };
 
         // private key
-        let prvk = {
-            let prv = secp256k1::SecretKey::from_slice(&pass_factor)?
-                .mul_tweak(&secp256k1::Scalar::from_be_bytes(factor)?)?;
-            match compressed {
-                true => PrivateKey::new(prv, Network::Bitcoin),
-                false => PrivateKey::new_uncompressed(prv, Network::Bitcoin),
-            }
-        };
+        let mut prvk = PrivateKey::from_slice(&pass_factor, Network::Bitcoin)?.mul_tweak(factor)?;
+        prvk.compressed = compressed;
         // checksum
         if address_hash != prvk.p2pkh()?.as_bytes().sha256_n(2)[..4] {
             return Err(Bip38Error::InvalidPassphrase);
@@ -362,8 +351,9 @@ macro_rules! derive_error {
 derive_error!(Bip38Error::InnerError, aes::cipher::InvalidLength);
 derive_error!(Bip38Error::InnerError, scrypt::errors::InvalidOutputLen);
 derive_error!(Bip38Error::InnerError, scrypt::errors::InvalidParams);
-derive_error!(Bip38Error::InnerError, bitcoin::secp256k1::Error);
 derive_error!(Bip38Error::InnerError, secp256k1::scalar::OutOfRangeError);
+derive_error!(Bip38Error::InnerError, bitcoin::secp256k1::Error);
+derive_error!(Bip38Error::InnerError, bitcoin::key::FromSliceError);
 
 trait Sha256N {
     fn sha256_n(&self, n: usize) -> [u8; 32];
@@ -395,8 +385,12 @@ impl ByteOperation for [u8] {
     }
 }
 
-trait SecpOperation {
+trait SecpOperation
+where
+    Self: Sized,
+{
     fn p2pkh(&self) -> Result<String, Bip38Error>;
+    fn mul_tweak(self, scalar: [u8; 32]) -> Result<Self, Bip38Error>;
 }
 
 impl SecpOperation for PrivateKey {
@@ -405,6 +399,27 @@ impl SecpOperation for PrivateKey {
         let pub_key = self.public_key(&Secp256k1::default());
         let address = Address::p2pkh(pub_key, NetworkKind::Main).to_string();
         Ok(address)
+    }
+
+    #[inline(always)]
+    fn mul_tweak(mut self, scalar: [u8; 32]) -> Result<Self, Bip38Error> {
+        self.inner = self.inner.mul_tweak(&Scalar::from_be_bytes(scalar)?)?;
+        Ok(self)
+    }
+}
+
+impl SecpOperation for PublicKey {
+    #[inline(always)]
+    fn p2pkh(&self) -> Result<String, Bip38Error> {
+        let address = Address::p2pkh(self, NetworkKind::Main).to_string();
+        Ok(address)
+    }
+
+    #[inline(always)]
+    fn mul_tweak(mut self, scalar: [u8; 32]) -> Result<Self, Bip38Error> {
+        let scalar = Scalar::from_be_bytes(scalar)?;
+        self.inner = self.inner.mul_tweak(&Secp256k1::default(), &scalar)?;
+        Ok(self)
     }
 }
 
