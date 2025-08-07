@@ -36,10 +36,7 @@ impl Bip38NonEc for PrivateKey {
         }
         let (part1, part2) = {
             let (half1, half2) = scrypt_key.split_at_mut(32);
-            half1
-                .iter_mut()
-                .zip(self.to_bytes().iter())
-                .for_each(|(x, y)| *x ^= y);
+            half1[..32].xor(&self.to_bytes()[..32]);
             let cipher = aes::Aes256::new_from_slice(half2)?;
 
             let (part1, part2) = half1.split_at_mut(16);
@@ -84,8 +81,8 @@ impl Bip38NonEc for PrivateKey {
         cipher.decrypt_block(GenericArray::from_mut_slice(part2));
 
         // XOR the decrypted parts with the first half of the scrypt key
-        (0..16).for_each(|i| half1[i] ^= part1[i]);
-        (0..16).for_each(|i| half1[i + 16] ^= part2[i]);
+        half1[..16].xor(&part1[..16]);
+        half1[16..32].xor(&part2[..16]);
 
         let mut prvk = PrivateKey::from_slice(half1, NetworkKind::Main)?;
         prvk.compressed = compress;
@@ -203,11 +200,11 @@ impl EcMultiply {
         let cipher = aes::Aes256::new_from_slice(half2)?;
         let (part1, part2) = half1.split_at_mut(16);
 
-        (0..16).for_each(|i| part1[i] ^= seed[i]);
+        part1[..16].xor(&seed[..16]);
         cipher.encrypt_block(GenericArray::from_mut_slice(part1));
 
-        (0..8).for_each(|i| part2[i] ^= part1[i + 8]);
-        (8..16).for_each(|i| part2[i] ^= seed[i + 8]);
+        part2[..8].xor(&part1[8..16]);
+        part2[8..16].xor(&seed[16..24]);
         cipher.encrypt_block(GenericArray::from_mut_slice(part2));
 
         let flag = if compressed { 0x20 } else { 0x00 } | if lot_seq { 0x40 } else { 0x00 };
@@ -272,11 +269,11 @@ impl EcMultiply {
 
             let mut tmp2 = encrypted_part2;
             cipher.decrypt_block(GenericArray::from_mut_slice(&mut tmp2));
-            (0..16).for_each(|i| part2[i] ^= tmp2[i]);
+            part2[..16].xor(&tmp2[..16]);
 
             let mut tmp1 = [&encrypted_part1[..8], &part2[..8]].concat();
             cipher.decrypt_block(GenericArray::from_mut_slice(&mut tmp1));
-            (0..16).for_each(|i| part1[i] ^= tmp1[i]);
+            part1[..16].xor(&tmp1[..16]);
 
             [&part1[..16], &part2[8..16]].concat().sha256_n(2)
         };
@@ -395,6 +392,17 @@ impl Sha256N for [u8] {
             hash = sha256::Hash::hash(&hash).to_byte_array();
         }
         hash
+    }
+}
+
+trait ByteOperation {
+    fn xor(&mut self, other: &Self);
+}
+
+impl ByteOperation for [u8] {
+    fn xor(&mut self, other: &Self) {
+        debug_assert!(self.len() == other.len());
+        (0..self.len()).for_each(|i| self[i] ^= other[i]);
     }
 }
 
