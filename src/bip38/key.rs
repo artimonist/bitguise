@@ -32,12 +32,13 @@ impl Bip38NonEc for PrivateKey {
         }
         let (part1, part2) = {
             let (half1, half2) = scrypt_key.split_at_mut(32);
-            half1[..32].xor(&self.to_bytes()[..32]);
             let cipher = aes::Aes256::new_from_slice(half2)?;
 
+            half1[..32].xor(&self.to_bytes()[..32]);
             let (part1, part2) = half1.split_at_mut(16);
             cipher.encrypt_block(GenericArray::from_mut_slice(part1));
             cipher.encrypt_block(GenericArray::from_mut_slice(part2));
+
             (part1, part2)
         };
 
@@ -109,7 +110,7 @@ impl EcMultiply {
         match (lot, seq) {
             (100000..=999999, 1..=4095) => {
                 let salt = salt[..4].to_vec();
-                let entropy = [&salt[..4], &(lot << 12 | seq).to_be_bytes()].concat();
+                let entropy = [&salt[..4], &(lot << 12 | seq).to_be_bytes()[..4]].concat();
 
                 let pass_factor = {
                     let pass = passphrase.nfc().collect::<String>();
@@ -158,9 +159,9 @@ impl EcMultiply {
         }
     }
 
-    fn generate_ec_key(seed: [u8; 24], ec_pass: &str) -> Result<String, Bip38Error> {
-        let compressed = true;
-        let ec_pass = base58::decode_check(ec_pass)?;
+    fn generate_ec_key(seed: [u8; 24], ec_factor: &str) -> Result<String, Bip38Error> {
+        let compress = true;
+        let ec_pass = base58::decode_check(ec_factor)?;
         let lot_seq = match &ec_pass[..8] {
             v if v == Self::PRE_EC_PASS_SEQ => true,
             v if v == Self::PRE_EC_PASS_NON => false,
@@ -196,7 +197,7 @@ impl EcMultiply {
             cipher.encrypt_block(GenericArray::from_mut_slice(part2));
         }
 
-        let flag = if compressed { 0x20 } else { 0x00 } | if lot_seq { 0x40 } else { 0x00 };
+        let flag = if compress { 0x20 } else { 0x00 } | if lot_seq { 0x40 } else { 0x00 };
         let result = [
             &PRE_EC[..2],
             &[flag][..1],
@@ -214,7 +215,7 @@ impl EcMultiply {
         if eprvk[..2] != PRE_EC {
             return Err(Bip38Error::InvalidKey);
         }
-        let (compressed, lot_seq) = (eprvk[2] & 0x20 == 0x20, eprvk[2] & 0x04 == 0x04);
+        let (compress, lot_seq) = (eprvk[2] & 0x20 == 0x20, eprvk[2] & 0x04 == 0x04);
         let address_hash = &eprvk[3..7];
         let entropy = &eprvk[7..15];
         let encrypted_part1 = &eprvk[15..23];
@@ -232,7 +233,7 @@ impl EcMultiply {
                 scrypt::scrypt(pass.as_bytes(), salt, &params, &mut pre_factor)?;
             }
             match lot_seq {
-                true => [&pre_factor[..32], entropy].concat().sha256_n(2),
+                true => [&pre_factor[..32], &entropy[..8]].concat().sha256_n(2),
                 false => pre_factor,
             }
         };
@@ -265,7 +266,8 @@ impl EcMultiply {
 
         // private key
         let mut prvk = PrivateKey::from_slice(&pass_factor, Network::Bitcoin)?.mul_tweak(factor)?;
-        prvk.compressed = compressed;
+        prvk.compressed = compress;
+
         // checksum
         if address_hash != &prvk.p2pkh()?.as_bytes().sha256_n(2)[..4] {
             return Err(Bip38Error::InvalidPassphrase);
