@@ -23,11 +23,7 @@ where
 
 impl Bip38NonEc for PrivateKey {
     fn encrypt_non_ec(&self, passphrase: &str) -> Result<String, Bip38Error> {
-        let salt = {
-            let pub_key = self.public_key(&Secp256k1::default());
-            let address = Address::p2pkh(pub_key, NetworkKind::Main).to_string();
-            address.as_bytes().sha256_n(2)[0..4].to_vec()
-        };
+        let salt = self.p2pkh()?.as_bytes().sha256_n(2)[0..4].to_vec();
         let mut scrypt_key = [0u8; 64];
         {
             let pass = passphrase.nfc().collect::<String>();
@@ -86,14 +82,10 @@ impl Bip38NonEc for PrivateKey {
 
         let mut prvk = PrivateKey::from_slice(half1, NetworkKind::Main)?;
         prvk.compressed = compress;
-        {
-            // Verify the checksum
-            let pub_key = prvk.public_key(&Secp256k1::default());
-            let address = Address::p2pkh(pub_key, NetworkKind::Main).to_string();
-            let checksum = address.as_bytes().sha256_n(2)[..4].to_vec();
-            if checksum != *salt {
-                return Err(Bip38Error::InvalidPassphrase);
-            }
+
+        // Verify the checksum
+        if *salt != prvk.p2pkh()?.as_bytes().sha256_n(2)[..4] {
+            return Err(Bip38Error::InvalidPassphrase);
         }
         Ok(prvk)
     }
@@ -288,13 +280,8 @@ impl EcMultiply {
             }
         };
         // checksum
-        {
-            let secp_pub = prvk.public_key(&Secp256k1::default());
-            let address = Address::p2pkh(secp_pub, Network::Bitcoin).to_string();
-            let checksum = &address.as_bytes().sha256_n(2)[..4];
-            if checksum != address_hash {
-                return Err(Bip38Error::InvalidPassphrase);
-            }
+        if address_hash != prvk.p2pkh()?.as_bytes().sha256_n(2)[..4] {
+            return Err(Bip38Error::InvalidPassphrase);
         }
         Ok(prvk)
     }
@@ -383,10 +370,11 @@ trait Sha256N {
 }
 
 impl Sha256N for [u8] {
+    #[inline(always)]
     fn sha256_n(&self, n: usize) -> [u8; 32] {
-        use bitcoin::{hashes::Hash, hashes::sha256};
-
         assert!(n > 0, "Cannot hash zero times");
+
+        use bitcoin::{hashes::Hash, hashes::sha256};
         let mut hash = sha256::Hash::hash(self).to_byte_array();
         for _ in 1..n {
             hash = sha256::Hash::hash(&hash).to_byte_array();
@@ -400,9 +388,23 @@ trait ByteOperation {
 }
 
 impl ByteOperation for [u8] {
+    #[inline(always)]
     fn xor(&mut self, other: &Self) {
         debug_assert!(self.len() == other.len());
         (0..self.len()).for_each(|i| self[i] ^= other[i]);
+    }
+}
+
+trait SecpOperation {
+    fn p2pkh(&self) -> Result<String, Bip38Error>;
+}
+
+impl SecpOperation for PrivateKey {
+    #[inline(always)]
+    fn p2pkh(&self) -> Result<String, Bip38Error> {
+        let pub_key = self.public_key(&Secp256k1::default());
+        let address = Address::p2pkh(pub_key, NetworkKind::Main).to_string();
+        Ok(address)
     }
 }
 
