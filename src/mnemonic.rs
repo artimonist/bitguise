@@ -1,8 +1,11 @@
-use crate::bip39::{Language, Mnemonic};
+use crate::{
+    Bip38Error,
+    bip39::{Language, Mnemonic},
+};
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArray};
 use sha2::{Digest, Sha256};
 
-pub trait MnemonicEnc {
+trait MnemonicEnc {
     fn mnemonic_encrypt(&self, pwd: &str, lang: Language) -> anyhow::Result<Mnemonic>;
     fn mnemonic_decrypt(&self, pwd: &str, lang: Language) -> anyhow::Result<Mnemonic>;
 }
@@ -60,6 +63,21 @@ impl MnemonicEnc for Mnemonic {
             }
             _ => unreachable!(),
         }
+    }
+}
+
+pub trait MnemonicEncryption {
+    fn mnemonic_encrypt(&self, passphrase: &str, extend: bool) -> Result<String, Bip38Error>;
+    fn mnemonic_decrypt(&self, passphrase: &str) -> Result<String, Bip38Error>;
+}
+
+impl MnemonicEncryption for str {
+    fn mnemonic_encrypt(&self, passphrase: &str, extend: bool) -> Result<String, Bip38Error> {
+        todo!("Implement mnemonic encryption logic here");
+    }
+
+    fn mnemonic_decrypt(&self, passphrase: &str) -> Result<String, Bip38Error> {
+        todo!("Implement mnemonic decryption logic here");
     }
 }
 
