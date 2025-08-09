@@ -1,5 +1,5 @@
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArray};
-use bitcoin::secp256k1::{self, Scalar, Secp256k1};
+use bitcoin::secp256k1::{self, Secp256k1};
 use bitcoin::{Address, Network, NetworkKind, PrivateKey, PublicKey, base58};
 use rand::RngCore;
 use unicode_normalization::UnicodeNormalization;
@@ -15,12 +15,14 @@ pub trait NoneEc {
         let prvk = PrivateKey::from_wif(wif)?;
         let compress = prvk.compressed;
         let salt = prvk.p2pkh()?.as_bytes().sha256_n(2)[0..4].to_vec();
+
         let mut scrypt_key = [0u8; 64];
         {
             let pass = passphrase.nfc().collect::<String>();
             let params = scrypt::Params::new(14, 8, 8, 64)?;
             scrypt::scrypt(pass.as_bytes(), &salt, &params, &mut scrypt_key)?;
         }
+
         let (part1, part2) = {
             let (half1, half2) = scrypt_key.split_at_mut(32);
             let cipher = aes::Aes256::new_from_slice(half2)?;
@@ -46,15 +48,12 @@ pub trait NoneEc {
     }
 
     fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<String, Bip38Error> {
-        let mut ebuffer = base58::decode_check(wif)?;
+        let ebuffer = base58::decode_check(wif)?;
         if ebuffer.len() != 39 || ebuffer[..2] != PRE_NON_EC {
             return Err(Bip38Error::InvalidKey);
         }
-        let [flag, salt, epart1, epart2] = ebuffer[2..].segments_mut([1, 4, 16, 16]);
+        let [flag, salt, epart1, epart2] = ebuffer[2..].segments([1, 4, 16, 16]);
         let compress = flag[0] & 0x20 == 0x20;
-        // let compress = (ebuffer[2] & 0x20) == 0x20;
-        // let salt = &ebuffer[3..7].to_vec();
-        // let (epart1, epart2) = ebuffer[7..].split_at_mut(16);
 
         let mut scrypt_key = [0u8; 64];
         {
@@ -67,13 +66,16 @@ pub trait NoneEc {
         let (half1, half2) = scrypt_key.split_at_mut(32);
         {
             let cipher = aes::Aes256::new_from_slice(half2)?;
+
+            let epart1 = &mut epart1.to_vec();
+            let epart2 = &mut epart2.to_vec();
             cipher.decrypt_block(GenericArray::from_mut_slice(epart1));
             cipher.decrypt_block(GenericArray::from_mut_slice(epart2));
-
-            // XOR the decrypted parts with the first half of the scrypt key
-            half1[..16].xor(&epart1[..16]);
-            half1[16..32].xor(&epart2[..16]);
+            half1[..16].xor(epart1);
+            half1[16..32].xor(epart2);
         }
+
+        // create private key
         let mut prvk = PrivateKey::from_slice(half1, NetworkKind::Main)?;
         prvk.compressed = compress;
 
@@ -92,7 +94,7 @@ pub trait EcMultiply {
     /// EC_PASS not has "lot" and "sequence".
     const PRE_EC_PASS_NON: [u8; 8] = [0x2C, 0xE9, 0xB3, 0xE1, 0xFF, 0x39, 0xE2, 0x53];
 
-    fn generate_ec_pass(
+    fn generate_ec_factor(
         passphrase: &str,
         salt: [u8; 8],
         lot: u32,
@@ -174,10 +176,10 @@ pub trait EcMultiply {
             scrypt::scrypt(pass_point, &salt, &params, &mut scrypt_key)?;
         };
 
-        let (half1, half2) = scrypt_key.split_at_mut(32);
-        let (part1, part2) = half1.split_at_mut(16);
-        {
-            let cipher = aes::Aes256::new_from_slice(half2)?;
+        let (ref part1, ref part2) = {
+            let [part1, part2, aes_key] = scrypt_key.segments_mut([16, 16, 32]);
+
+            let cipher = aes::Aes256::new_from_slice(aes_key)?;
 
             part1[..16].xor(&seed[..16]);
             cipher.encrypt_block(GenericArray::from_mut_slice(part1));
@@ -185,7 +187,9 @@ pub trait EcMultiply {
             part2[..8].xor(&part1[8..16]);
             part2[8..16].xor(&seed[16..24]);
             cipher.encrypt_block(GenericArray::from_mut_slice(part2));
-        }
+
+            (part1, part2)
+        };
 
         let flag = if compress { 0x20 } else { 0x00 } | if lot_seq { 0x40 } else { 0x00 };
         let result = [
@@ -236,16 +240,15 @@ pub trait EcMultiply {
         }
 
         let factor: [u8; 32] = {
-            let (half1, half2) = seed.split_at_mut(32);
-            let (part1, part2) = half1.split_at_mut(16);
-            let cipher = aes::Aes256::new(GenericArray::from_mut_slice(half2));
+            let [part1, part2, aes_key] = seed.segments_mut([16, 16, 32]);
+            let cipher = aes::Aes256::new(GenericArray::from_mut_slice(aes_key));
 
-            let mut tmp2 = epart2.to_vec();
-            cipher.decrypt_block(GenericArray::from_mut_slice(&mut tmp2));
+            let tmp2 = &mut epart2.to_vec();
+            cipher.decrypt_block(GenericArray::from_mut_slice(tmp2));
             part2[..16].xor(&tmp2[..16]);
 
-            let mut tmp1 = [&epart1[..8], &part2[..8]].concat();
-            cipher.decrypt_block(GenericArray::from_mut_slice(&mut tmp1));
+            let tmp1 = &mut [&epart1[..8], &part2[..8]].concat();
+            cipher.decrypt_block(GenericArray::from_mut_slice(tmp1));
             part1[..16].xor(&tmp1[..16]);
 
             [&part1[..16], &part2[8..16]].concat().sha256_n(2)
@@ -300,7 +303,7 @@ impl Bip38 for str {
     fn bip38_ec_factor(&self, lot: u32, seq: u32) -> Result<String, Bip38Error> {
         let mut salt = [0u8; 8];
         rand::thread_rng().fill_bytes(&mut salt);
-        Self::generate_ec_pass(self, salt, lot, seq)
+        Self::generate_ec_factor(self, salt, lot, seq)
     }
 
     #[inline]
@@ -355,9 +358,9 @@ trait ByteOperation {
 impl ByteOperation for [u8] {
     #[inline(always)]
     fn sha256_n(&self, n: usize) -> [u8; 32] {
+        use bitcoin::{hashes::Hash, hashes::sha256};
         assert!(n > 0, "Cannot hash zero times");
 
-        use bitcoin::{hashes::Hash, hashes::sha256};
         let mut hash = sha256::Hash::hash(self).to_byte_array();
         for _ in 1..n {
             hash = sha256::Hash::hash(&hash).to_byte_array();
@@ -371,7 +374,7 @@ impl ByteOperation for [u8] {
         (0..self.len()).for_each(|i| self[i] ^= other[i]);
     }
 
-    #[inline(always)]
+    #[inline]
     fn segments<const N: usize>(&self, len_list: [usize; N]) -> [&[u8]; N] {
         let mut start = 0;
         let mut segments = [&self[..0]; N];
@@ -382,6 +385,7 @@ impl ByteOperation for [u8] {
         segments
     }
 
+    #[inline]
     fn segments_mut<const N: usize>(&mut self, lens: [usize; N]) -> [&mut [u8]; N] {
         let mut segments = vec![];
         let mut rest = self;
@@ -412,6 +416,7 @@ impl SecpOperation for PrivateKey {
 
     #[inline(always)]
     fn mul_tweak(mut self, scalar: [u8; 32]) -> Result<Self, Bip38Error> {
+        use bitcoin::secp256k1::Scalar;
         self.inner = self.inner.mul_tweak(&Scalar::from_be_bytes(scalar)?)?;
         Ok(self)
     }
@@ -426,6 +431,7 @@ impl SecpOperation for PublicKey {
 
     #[inline(always)]
     fn mul_tweak(mut self, scalar: [u8; 32]) -> Result<Self, Bip38Error> {
+        use bitcoin::secp256k1::Scalar;
         let scalar = Scalar::from_be_bytes(scalar)?;
         self.inner = self.inner.mul_tweak(&Secp256k1::default(), &scalar)?;
         Ok(self)
@@ -521,7 +527,7 @@ mod tests {
             }
             println!("salt: {:x?}", &bs[8..16]);
 
-            let ec_pass = str::generate_ec_pass(pass, salt, lot, seq)?;
+            let ec_pass = str::generate_ec_factor(pass, salt, lot, seq)?;
             assert_eq!(ec_pass, factor);
         }
         Ok(())

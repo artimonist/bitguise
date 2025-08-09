@@ -1,7 +1,7 @@
 mod bip38;
 mod bip39;
-mod mnemonic;
+// mod mnemonic;
 
 pub use bip38::{Bip38 as BIP38, Bip38Error};
 pub use bip39::{Language, Mnemonic};
-pub use mnemonic::MnemonicEncryption;
+// pub use mnemonic::MnemonicEncryption;
