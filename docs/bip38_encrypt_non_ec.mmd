@@ -1,0 +1,18 @@
+---
+config:
+  layout: dagre
+  theme: default
+title: bip38_encrypt_non_ec
+---
+flowchart TD
+    wif --> addr(["p2pkh()"]) --> addr_hash(["sha256(2)"]) --> salt["salt"]
+    passphrase["passphrase"] --> nfc(["normalize()"]) --> K(["scrypt(14, 8, 8, 64)"])
+    salt --> K
+    K --> half1["half1"] & half2["half2"]
+    half2 --> cipher["cipher"]
+    wif --> xor --> half1
+    half1 --> part1["part1"] & part2["part2"]
+    part1 --> E1(["encrypt()"])
+    part2 --> E2(["encrypt()"])
+    cipher --> E1 & E2 --> R["flag|salt|part1|part2"]
+    R@{ shape: rounded}

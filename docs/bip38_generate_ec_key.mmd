@@ -1,0 +1,23 @@
+---
+title: bip38_generate_ec_key
+---
+flowchart TD
+    R(["random()"])
+    sha256(["sha256(2)"])
+    mul_tweak(["`
+      mul_tweak()
+      p2pkh()
+      sha256(2)
+    `"])
+    R --> seed --> factor(["sha256(2)"])
+    pass_point --> pub_key(["PublicKey"])
+    pub_key & factor --> mul_tweak --> address_hash
+    address_hash & entropy --> salt
+    pass_point & salt --> scrypt_key(["scrypt(10, 1, 1, 64)"]) --> half1 & half2
+    half2 --> cipher --> E1 & E2
+    half1 --> part1 & part2
+    part1 & seed --> X1(["xor"]) --> E1(["aes_256()"])
+    part2 & E1 & seed --> X2(["xor"]) --> E2(["aes_256()"])
+
+    address_hash & entropy & E1 & E2 --> wif
+

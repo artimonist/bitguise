@@ -1,0 +1,39 @@
+---
+title: bip38_decrypt_ec_key
+---
+flowchart TD
+    LotSeq{"lot & seq?"}
+    S1(["scrypt(14, 8, 8, 64)"])
+    S2(["scrypt(10, 1, 1, 64)"])
+    Sha256(["sha256(2)"])
+    D1(["aes_256()"])
+    D2(["aes_256()"])
+    X1(["xor"])
+    X2(["xor"])
+    Private_to_Public(["`
+      PrivateKey
+      PublicKey
+    `"])
+
+    address_hash
+    entropy
+    epart1
+    epart2
+
+    passphrase & salt --> S1 --> prefactor
+
+    %% LotSeq -->|true| pre_factor && entropy --> Sha256
+    %% LotSeq -->|false| pre_factor --> pass_factor
+    pre_factor --> pass_factor --> Private_to_Public --> pass_point
+    subgraph SALT
+      direction LR
+      address_hash --- entropy
+    end
+    pass_point & SALT --> S2 --> seed
+
+    seed --> half1 & half2
+    haf1 --> part1 & part2
+    haf2 --> cipher
+
+    cipher & epart2 --> D2 & part2 --> X2
+    cipher & epart1 & part2 --> D1 & part1 --> X1

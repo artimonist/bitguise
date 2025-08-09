@@ -1,0 +1,21 @@
+---
+title: bip38_generate_ec_factor
+---
+
+flowchart TD
+    lot_seq{"lot & seq?"} -->|yes| HAS_LOT_SEQ
+    lot_seq -->|no| NON_LOT_SEQ
+    subgraph HAS_LOT_SEQ
+      passphrase --> pre_factor(["scrypt(14, 8, 8, 32)"])
+      R(["random()"]) --> salt --> pre_factor
+      salt & lot & seq --> entropy
+      pre_factor & entropy --> sha256(["sha256(2)"]) --> pass_factor
+      pass_factor --> pk(["PrivateKey"]) --> pubk(["PublicKey"]) --> pass_point
+      entropy & pass_point --> ec_factor(ec_factor)
+    end
+    subgraph NON_LOT_SEQ
+      R2(["random()"]) --> entropy2[entropy] --> pass_factor2
+      passphrase2[passphrase] --> pass_factor2(["scrypt(14, 8, 8, 32)"])
+      pass_factor2 --> pk2(["PrivateKey"]) --> pubk2(["PublicKey"]) --> pass_point2["pass_point"]
+      pass_point2 & entropy2 --> ec_factor2(ec_factor)
+    end

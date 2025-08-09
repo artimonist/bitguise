@@ -1,0 +1,20 @@
+---
+config:
+  theme: default
+  layout: dagre
+title: bip38_decrypt_non_ec
+---
+flowchart TD
+    passphrase["passphrase"] --> nfc(["normalize()"])
+    wif["wif"] --> salt["salt"] & epart1["epart1"] & epart2["epart2"]
+    nfc --> K(["scrypt(14, 8, 8, 64)"])
+    salt --> K --> half1["half1"] & half2["half2"]
+    half1 --> part1["part1"] & part2["part2"]
+    epart1 --> D1(["decrypt()"]) --> X1(["xor()"])
+    epart2 --> D2(["decrypt()"]) --> X2(["xor()"])
+    part1 --> X1
+    part2 --> X2
+    half2 --> cipher["cipher"] --> D1 & D2
+    X1 & X2 --> pk["private key"]
+    pk --> p2pkh(["p2pkh()"]) --> sha256(["sha256(2)"]) --> checksum(["checksum == salt"])
+    pk@{ shape: rounded}
