@@ -10,20 +10,11 @@ const PRE_NON_EC: [u8; 2] = [0x01, 0x42];
 /// Prefix of all ec encrypted keys.
 const PRE_EC: [u8; 2] = [0x01, 0x43];
 
-trait Bip38NonEc
-where
-    Self: Sized,
-{
-    /// Encrypts a non-EC private key using BIP38.
-    fn encrypt_non_ec(&self, passphrase: &str) -> Result<String, Bip38Error>;
-
-    /// Decrypts a non-EC private key using BIP38.
-    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<Self, Bip38Error>;
-}
-
-impl Bip38NonEc for PrivateKey {
-    fn encrypt_non_ec(&self, passphrase: &str) -> Result<String, Bip38Error> {
-        let salt = self.p2pkh()?.as_bytes().sha256_n(2)[0..4].to_vec();
+pub trait NoneEc {
+    fn encrypt_non_ec(wif: &str, passphrase: &str) -> Result<String, Bip38Error> {
+        let prvk = PrivateKey::from_wif(wif)?;
+        let compress = prvk.compressed;
+        let salt = prvk.p2pkh()?.as_bytes().sha256_n(2)[0..4].to_vec();
         let mut scrypt_key = [0u8; 64];
         {
             let pass = passphrase.nfc().collect::<String>();
@@ -34,7 +25,7 @@ impl Bip38NonEc for PrivateKey {
             let (half1, half2) = scrypt_key.split_at_mut(32);
             let cipher = aes::Aes256::new_from_slice(half2)?;
 
-            half1[..32].xor(&self.to_bytes()[..32]);
+            half1[..32].xor(&prvk.to_bytes()[..32]);
             let (part1, part2) = half1.split_at_mut(16);
             cipher.encrypt_block(GenericArray::from_mut_slice(part1));
             cipher.encrypt_block(GenericArray::from_mut_slice(part2));
@@ -42,7 +33,7 @@ impl Bip38NonEc for PrivateKey {
             (part1, part2)
         };
 
-        let compress: [u8; 1] = if self.compressed { [0xe0] } else { [0xc0] };
+        let compress: [u8; 1] = if compress { [0xe0] } else { [0xc0] };
         let buffer = [
             &PRE_NON_EC[..2],
             &compress[..1],
@@ -54,14 +45,16 @@ impl Bip38NonEc for PrivateKey {
         Ok(base58::encode_check(&buffer))
     }
 
-    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<Self, Bip38Error> {
+    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<String, Bip38Error> {
         let mut ebuffer = base58::decode_check(wif)?;
         if ebuffer.len() != 39 || ebuffer[..2] != PRE_NON_EC {
             return Err(Bip38Error::InvalidKey);
         }
-        let compress = (ebuffer[2] & 0x20) == 0x20;
-        let salt = &ebuffer[3..7].to_vec();
-        let (part1, part2) = ebuffer[7..].split_at_mut(16);
+        let [flag, salt, epart1, epart2] = ebuffer[2..].segments_mut([1, 4, 16, 16]);
+        let compress = flag[0] & 0x20 == 0x20;
+        // let compress = (ebuffer[2] & 0x20) == 0x20;
+        // let salt = &ebuffer[3..7].to_vec();
+        // let (epart1, epart2) = ebuffer[7..].split_at_mut(16);
 
         let mut scrypt_key = [0u8; 64];
         {
@@ -74,12 +67,12 @@ impl Bip38NonEc for PrivateKey {
         let (half1, half2) = scrypt_key.split_at_mut(32);
         {
             let cipher = aes::Aes256::new_from_slice(half2)?;
-            cipher.decrypt_block(GenericArray::from_mut_slice(part1));
-            cipher.decrypt_block(GenericArray::from_mut_slice(part2));
+            cipher.decrypt_block(GenericArray::from_mut_slice(epart1));
+            cipher.decrypt_block(GenericArray::from_mut_slice(epart2));
 
             // XOR the decrypted parts with the first half of the scrypt key
-            half1[..16].xor(&part1[..16]);
-            half1[16..32].xor(&part2[..16]);
+            half1[..16].xor(&epart1[..16]);
+            half1[16..32].xor(&epart2[..16]);
         }
         let mut prvk = PrivateKey::from_slice(half1, NetworkKind::Main)?;
         prvk.compressed = compress;
@@ -88,13 +81,11 @@ impl Bip38NonEc for PrivateKey {
         if salt != &prvk.p2pkh()?.as_bytes().sha256_n(2)[..4] {
             return Err(Bip38Error::InvalidPassphrase);
         }
-        Ok(prvk)
+        Ok(prvk.to_string())
     }
 }
 
-struct EcMultiply;
-
-impl EcMultiply {
+pub trait EcMultiply {
     /// EC_PASS has "lot" and "sequence".
     const PRE_EC_PASS_SEQ: [u8; 8] = [0x2C, 0xE9, 0xB3, 0xE1, 0xFF, 0x39, 0xE2, 0x51];
 
@@ -162,13 +153,12 @@ impl EcMultiply {
     fn generate_ec_key(seed: [u8; 24], ec_factor: &str) -> Result<String, Bip38Error> {
         let compress = true;
         let ec_pass = base58::decode_check(ec_factor)?;
-        let lot_seq = match &ec_pass[..8] {
+        let [ec_pre, entropy, pass_point] = ec_pass.segments([8, 8, 33]);
+        let lot_seq = match ec_pre {
             v if v == Self::PRE_EC_PASS_SEQ => true,
             v if v == Self::PRE_EC_PASS_NON => false,
             _ => return Err(Bip38Error::InvalidEcFactor),
         };
-        let entropy = &ec_pass[8..16];
-        let pass_point = &ec_pass[16..49];
 
         let address_hash = {
             let factor = seed.sha256_n(2);
@@ -210,16 +200,13 @@ impl EcMultiply {
         Ok(base58::encode_check(&result))
     }
 
-    fn decrypt_ec_key(wif_ec_key: &str, passphrase: &str) -> Result<PrivateKey, Bip38Error> {
-        let eprvk = base58::decode_check(wif_ec_key)?;
-        if eprvk[..2] != PRE_EC {
+    fn decrypt_ec_key(wif_ec_key: &str, passphrase: &str) -> Result<String, Bip38Error> {
+        let ebuffer = base58::decode_check(wif_ec_key)?;
+        if ebuffer.len() != 39 || ebuffer[..2] != PRE_EC {
             return Err(Bip38Error::InvalidKey);
         }
-        let (compress, lot_seq) = (eprvk[2] & 0x20 == 0x20, eprvk[2] & 0x04 == 0x04);
-        let address_hash = &eprvk[3..7];
-        let entropy = &eprvk[7..15];
-        let encrypted_part1 = &eprvk[15..23];
-        let encrypted_part2 = &eprvk[23..39];
+        let [flag, address_hash, entropy, epart1, epart2] = ebuffer[2..].segments([1, 4, 8, 8, 16]);
+        let (compress, lot_seq) = (flag[0] & 0x20 == 0x20, flag[0] & 0x04 == 0x04);
         let salt = match lot_seq {
             true => &entropy[..4],
             false => &entropy[..8],
@@ -253,11 +240,11 @@ impl EcMultiply {
             let (part1, part2) = half1.split_at_mut(16);
             let cipher = aes::Aes256::new(GenericArray::from_mut_slice(half2));
 
-            let mut tmp2 = encrypted_part2.to_vec();
+            let mut tmp2 = epart2.to_vec();
             cipher.decrypt_block(GenericArray::from_mut_slice(&mut tmp2));
             part2[..16].xor(&tmp2[..16]);
 
-            let mut tmp1 = [&encrypted_part1[..8], &part2[..8]].concat();
+            let mut tmp1 = [&epart1[..8], &part2[..8]].concat();
             cipher.decrypt_block(GenericArray::from_mut_slice(&mut tmp1));
             part1[..16].xor(&tmp1[..16]);
 
@@ -272,7 +259,7 @@ impl EcMultiply {
         if address_hash != &prvk.p2pkh()?.as_bytes().sha256_n(2)[..4] {
             return Err(Bip38Error::InvalidPassphrase);
         }
-        Ok(prvk)
+        Ok(prvk.to_string())
     }
 }
 
@@ -281,43 +268,46 @@ impl EcMultiply {
 ///  [Definition](https://github.com/bitcoin/bips/blob/master/bip-0038.mediawiki)
 ///  [Description](https://blockcoach.com/2023/202306/2023-06-20-A-BIP38/)
 ///  [Implementation](https://github.com/ceca69ec/bip38)
-pub trait Bip38 {
+pub trait Bip38: NoneEc + EcMultiply {
     fn bip38_encrypt(&self, passphrase: &str) -> Result<String, Bip38Error>;
     fn bip38_decrypt(&self, passphrase: &str) -> Result<String, Bip38Error>;
     fn bip38_ec_factor(&self, lot: u32, seq: u32) -> Result<String, Bip38Error>;
     fn bip38_ec_generate(&self) -> Result<String, Bip38Error>;
 }
 
+impl NoneEc for str {}
+impl EcMultiply for str {}
 impl Bip38 for str {
+    #[inline(always)]
     fn bip38_encrypt(&self, passphrase: &str) -> Result<String, Bip38Error> {
-        let prvk = PrivateKey::from_wif(self)?;
-        prvk.encrypt_non_ec(passphrase)
+        Self::encrypt_non_ec(self, passphrase)
     }
 
+    #[inline(always)]
     fn bip38_decrypt(&self, passphrase: &str) -> Result<String, Bip38Error> {
         if self.starts_with("6P") && self.len() == 58 {
             let pre = base58::decode_check(self)?[..2].to_vec();
             if pre == PRE_NON_EC {
-                let prvk = PrivateKey::decrypt_non_ec(self, passphrase)?;
-                return Ok(prvk.to_wif());
+                return Self::decrypt_non_ec(self, passphrase);
             } else if pre == PRE_EC {
-                let prvk = EcMultiply::decrypt_ec_key(self, passphrase)?;
-                return Ok(prvk.to_wif());
+                return Self::decrypt_ec_key(self, passphrase);
             }
         }
         Err(Bip38Error::InvalidKey)
     }
 
+    #[inline]
     fn bip38_ec_factor(&self, lot: u32, seq: u32) -> Result<String, Bip38Error> {
         let mut salt = [0u8; 8];
         rand::thread_rng().fill_bytes(&mut salt);
-        EcMultiply::generate_ec_pass(self, salt, lot, seq)
+        Self::generate_ec_pass(self, salt, lot, seq)
     }
 
+    #[inline]
     fn bip38_ec_generate(&self) -> Result<String, Bip38Error> {
         let mut seed = [0u8; 24];
         rand::thread_rng().fill_bytes(&mut seed);
-        EcMultiply::generate_ec_key(seed, self)
+        Self::generate_ec_key(seed, self)
     }
 }
 
@@ -355,11 +345,14 @@ derive_error!(Bip38Error::InnerError, secp256k1::scalar::OutOfRangeError);
 derive_error!(Bip38Error::InnerError, bitcoin::secp256k1::Error);
 derive_error!(Bip38Error::InnerError, bitcoin::key::FromSliceError);
 
-trait Sha256N {
+trait ByteOperation {
     fn sha256_n(&self, n: usize) -> [u8; 32];
+    fn xor(&mut self, other: &Self);
+    fn segments<const N: usize>(&self, len_list: [usize; N]) -> [&[u8]; N];
+    fn segments_mut<const N: usize>(&mut self, len_list: [usize; N]) -> [&mut [u8]; N];
 }
 
-impl Sha256N for [u8] {
+impl ByteOperation for [u8] {
     #[inline(always)]
     fn sha256_n(&self, n: usize) -> [u8; 32] {
         assert!(n > 0, "Cannot hash zero times");
@@ -371,17 +364,33 @@ impl Sha256N for [u8] {
         }
         hash
     }
-}
 
-trait ByteOperation {
-    fn xor(&mut self, other: &Self);
-}
-
-impl ByteOperation for [u8] {
     #[inline(always)]
     fn xor(&mut self, other: &Self) {
         debug_assert!(self.len() == other.len());
         (0..self.len()).for_each(|i| self[i] ^= other[i]);
+    }
+
+    #[inline(always)]
+    fn segments<const N: usize>(&self, len_list: [usize; N]) -> [&[u8]; N] {
+        let mut start = 0;
+        let mut segments = [&self[..0]; N];
+        for (i, &len) in len_list.iter().enumerate() {
+            segments[i] = &self[start..start + len];
+            start += len;
+        }
+        segments
+    }
+
+    fn segments_mut<const N: usize>(&mut self, lens: [usize; N]) -> [&mut [u8]; N] {
+        let mut segments = vec![];
+        let mut rest = self;
+        for len in lens {
+            let (part1, part2) = rest.split_at_mut(len);
+            segments.push(part1);
+            rest = part2;
+        }
+        segments.try_into().unwrap()
     }
 }
 
@@ -459,12 +468,11 @@ mod tests {
         for data in TEST_DATA.chunks(3) {
             let (pwd, enc_wif, wif) = (data[0], data[1], data[2]);
 
-            let prvk = PrivateKey::from_wif(wif).expect("Failed to parse WIF");
-            let encrypted = prvk.encrypt_non_ec(pwd).expect("Encryption failed");
+            let encrypted = str::encrypt_non_ec(wif, pwd).expect("Encryption failed");
             assert_eq!(encrypted, *enc_wif, "Encryption mismatch");
 
-            let decrypted = PrivateKey::decrypt_non_ec(&encrypted, pwd).expect("Decryption failed");
-            assert_eq!(decrypted.to_wif(), *wif, "Decryption mismatch");
+            let decrypted = str::decrypt_non_ec(&encrypted, pwd).expect("Decryption failed");
+            assert_eq!(decrypted, *wif, "Decryption mismatch");
         }
     }
 
@@ -507,13 +515,13 @@ mod tests {
 
             let bs = base58::decode_check(factor)?;
             if lot > 0 || seq > 0 {
-                assert_eq!(bs[..8], EcMultiply::PRE_EC_PASS_SEQ);
+                assert_eq!(bs[..8], str::PRE_EC_PASS_SEQ);
             } else {
-                assert_eq!(bs[..8], EcMultiply::PRE_EC_PASS_NON);
+                assert_eq!(bs[..8], str::PRE_EC_PASS_NON);
             }
             println!("salt: {:x?}", &bs[8..16]);
 
-            let ec_pass = EcMultiply::generate_ec_pass(pass, salt, lot, seq)?;
+            let ec_pass = str::generate_ec_pass(pass, salt, lot, seq)?;
             assert_eq!(ec_pass, factor);
         }
         Ok(())
@@ -564,7 +572,7 @@ mod tests {
         ];
         for data in TEST_DATA.chunks(3) {
             let (seed, factor, wif) = (hex::decode(data[0])?.try_into().unwrap(), data[1], data[2]);
-            let ec_key = EcMultiply::generate_ec_key(seed, factor)?;
+            let ec_key = str::generate_ec_key(seed, factor)?;
             assert_eq!(ec_key, wif);
         }
         Ok(())
