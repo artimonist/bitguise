@@ -33,8 +33,7 @@ impl Execute for TranslateCommand {
         // translate the mnemonic to the target language
         let words = mnemonic
             .indices()
-            .iter()
-            .map(|&i| language.word_at(i))
+            .map(|i| language.word_at(i))
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
         let translated = match language {

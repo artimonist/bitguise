@@ -28,7 +28,7 @@ impl Mnemonic {
     /// * `language` - The language of the mnemonic.
     /// # Returns
     /// * `Ok(Mnemonic)` - If the mnemonic is successfully created.
-    pub fn new(entropy: &[u8], language: Language) -> Result<Self, MnemonicError> {
+    pub fn from_entropy(entropy: &[u8], language: Language) -> Result<Self, MnemonicError> {
         // verify length
         let length = match entropy.len() {
             16 => 12,
@@ -36,7 +36,7 @@ impl Mnemonic {
             24 => 18,
             28 => 21,
             32 => 24,
-            _ => return Err(MnemonicError::InvalidLength),
+            n @ _ => return Err(MnemonicError::InvalidCount(n)),
         };
 
         // calculate checksum
@@ -61,19 +61,21 @@ impl Mnemonic {
 
     /// Mnemonic words count.
     #[inline(always)]
-    pub fn size(&self) -> usize {
+    pub fn word_count(&self) -> usize {
         self.words.len()
     }
 
     /// Get the mnemonic words.
     #[inline(always)]
-    pub fn words(&self) -> &[String] {
-        &self.words
+    pub fn words(&self) -> impl Iterator<Item = &String> {
+        self.words.iter()
     }
 
     #[inline]
-    pub fn indices(&self) -> Vec<usize> {
-        self.language.indices(self.words.iter()).unwrap()[..self.words.len()].to_vec()
+    pub fn indices(&self) -> impl Iterator<Item = usize> {
+        self.words
+            .iter()
+            .map(|w| self.language.index_of(w).unwrap())
     }
 
     #[inline]
@@ -109,7 +111,7 @@ impl Mnemonic {
     pub fn verify_checksum(indices: &[usize]) -> Result<(), MnemonicError> {
         // verify length
         if !matches!(indices.len(), 12 | 15 | 18 | 21 | 24) {
-            return Err(MnemonicError::InvalidLength);
+            return Err(MnemonicError::InvalidCount(indices.len()));
         }
 
         let mut entropy = Vec::from_bits_chunk(indices.iter().copied(), 11);
@@ -131,7 +133,7 @@ impl std::str::FromStr for Mnemonic {
         // verify length
         let words: Vec<&str> = s.split_whitespace().collect();
         if !matches!(words.len(), 12 | 15 | 18 | 21 | 24) {
-            return Err(MnemonicError::InvalidLength);
+            return Err(MnemonicError::InvalidCount(words.len()));
         }
 
         // detect languages
@@ -185,15 +187,15 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum MnemonicError {
-    #[error("invalid mnemonic length")]
-    InvalidLength,
+    #[error("Invalid word count: {0}")]
+    InvalidCount(usize),
 
-    #[error("invalid mnemonic language")]
+    #[error("Invalid language")]
     InvalidLanguage,
 
-    #[error("inconclusive mnemonic language")]
+    #[error("Inconclusive language: {0:?}")]
     InconclusiveLanguage(Vec<Language>),
 
-    #[error("invalid mnemonic checksum")]
+    #[error("Invalid checksum")]
     InvalidChecksum,
 }
