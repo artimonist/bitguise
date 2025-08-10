@@ -48,11 +48,11 @@ pub trait NoneEc {
     }
 
     fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<String, Bip38Error> {
-        let ebuffer = base58::decode_check(wif)?;
+        let mut ebuffer = base58::decode_check(wif)?;
         if ebuffer.len() != 39 || ebuffer[..2] != PRE_NON_EC {
             return Err(Bip38Error::InvalidKey);
         }
-        let [flag, salt, epart1, epart2] = ebuffer[2..].segments([1, 4, 16, 16]);
+        let [ref flag, ref salt, epart1, epart2] = ebuffer[2..].segments_mut([1, 4, 16, 16]);
         let compress = flag[0] & 0x20 == 0x20;
 
         let mut scrypt_key = [0u8; 64];
@@ -66,9 +66,6 @@ pub trait NoneEc {
         let (half1, half2) = scrypt_key.split_at_mut(32);
         {
             let cipher = aes::Aes256::new_from_slice(half2)?;
-
-            let epart1 = &mut epart1.to_vec();
-            let epart2 = &mut epart2.to_vec();
             cipher.decrypt_block(GenericArray::from_mut_slice(epart1));
             cipher.decrypt_block(GenericArray::from_mut_slice(epart2));
             half1[..16].xor(epart1);
@@ -80,7 +77,7 @@ pub trait NoneEc {
         prvk.compressed = compress;
 
         // Verify the checksum
-        if salt != &prvk.p2pkh()?.as_bytes().sha256_n(2)[..4] {
+        if *salt != &prvk.p2pkh()?.as_bytes().sha256_n(2)[..4] {
             return Err(Bip38Error::InvalidPassphrase);
         }
         Ok(prvk.to_string())
