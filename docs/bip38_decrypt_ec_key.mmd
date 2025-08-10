@@ -31,9 +31,10 @@ flowchart TD
     end
     pass_point & SALT --> S2 --> seed
 
-    seed --> half1 & half2
-    haf1 --> part1 & part2
-    haf2 --> cipher
-
-    cipher & epart2 --> D2 & part2 --> X2
-    cipher & epart1 & part2 --> D1 & part1 --> X1
+    subgraph FACTOR
+      seed --> part1 & part2 & cipher
+      cipher & epart2 --> D2 --> X2
+      part2 --> X2
+      epart1 & part2 --> D1
+      %%  & part1 --> X1
+    end

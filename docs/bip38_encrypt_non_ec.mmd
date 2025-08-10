@@ -5,10 +5,9 @@ config:
 title: bip38_encrypt_non_ec
 ---
 flowchart TD
-    wif --> addr(["p2pkh()"]) --> addr_hash(["sha256(2)"]) --> salt["salt"]
+    wif --> addr(["p2pkh()"]) --> addr_hash(["sha256(2)"])
     passphrase["passphrase"] --> nfc(["normalize()"]) --> K(["scrypt(14, 8, 8, 64)"])
-    salt --> K
-    K --> half1["half1"] & half2["half2"]
+    addr_hash --> K --> half1["half1"] & half2["half2"]
     half2 --> cipher["cipher"]
     wif --> xor --> half1
     half1 --> part1["part1"] & part2["part2"]

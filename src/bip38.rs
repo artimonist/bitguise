@@ -23,9 +23,9 @@ pub trait NoneEc {
             scrypt::scrypt(pass.as_bytes(), &salt, &params, &mut scrypt_key)?;
         }
 
-        let (part1, part2) = {
-            let (half1, half2) = scrypt_key.split_at_mut(32);
-            let cipher = aes::Aes256::new_from_slice(half2)?;
+        let (ref part1, ref part2) = {
+            let (half1, ref aes_key) = scrypt_key.split_at_mut(32);
+            let cipher = aes::Aes256::new_from_slice(aes_key)?;
 
             half1[..32].xor(&prvk.to_bytes()[..32]);
             let (part1, part2) = half1.split_at_mut(16);
@@ -63,9 +63,9 @@ pub trait NoneEc {
         };
 
         // Decrypt the two parts of the key
-        let (half1, half2) = scrypt_key.split_at_mut(32);
+        let (half1, ref aes_key) = scrypt_key.split_at_mut(32);
         {
-            let cipher = aes::Aes256::new_from_slice(half2)?;
+            let cipher = aes::Aes256::new_from_slice(aes_key)?;
             cipher.decrypt_block(GenericArray::from_mut_slice(epart1));
             cipher.decrypt_block(GenericArray::from_mut_slice(epart2));
             half1[..16].xor(epart1);
@@ -174,8 +174,7 @@ pub trait EcMultiply {
         };
 
         let (ref part1, ref part2) = {
-            let [part1, part2, aes_key] = scrypt_key.segments_mut([16, 16, 32]);
-
+            let [part1, part2, ref aes_key] = scrypt_key.segments_mut([16, 16, 32]);
             let cipher = aes::Aes256::new_from_slice(aes_key)?;
 
             part1[..16].xor(&seed[..16]);
@@ -237,8 +236,8 @@ pub trait EcMultiply {
         }
 
         let factor: [u8; 32] = {
-            let [part1, part2, aes_key] = seed.segments_mut([16, 16, 32]);
-            let cipher = aes::Aes256::new(GenericArray::from_mut_slice(aes_key));
+            let [part1, part2, ref aes_key] = seed.segments_mut([16, 16, 32]);
+            let cipher = aes::Aes256::new_from_slice(aes_key)?;
 
             let tmp2 = &mut epart2.to_vec();
             cipher.decrypt_block(GenericArray::from_mut_slice(tmp2));
