@@ -71,17 +71,21 @@ impl Mnemonic {
         self.words.iter()
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn indices(&self) -> impl Iterator<Item = usize> {
         self.words
             .iter()
             .map(|w| self.language.index_of(w).unwrap())
     }
 
+    #[inline(always)]
+    pub fn language(&self) -> Language {
+        self.language
+    }
+
     #[inline]
     pub fn entropy(&self) -> Vec<u8> {
-        let indices = self.indices();
-        let mut entropy: Vec<u8> = Vec::from_bits_chunk(indices.into_iter(), 11);
+        let mut entropy: Vec<u8> = Vec::from_bits_chunk(self.indices(), 11);
         entropy.pop(); // remove checksum
         entropy
     }
