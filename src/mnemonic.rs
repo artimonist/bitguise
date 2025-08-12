@@ -4,32 +4,8 @@ use rand::RngCore;
 use unicode_normalization::UnicodeNormalization;
 
 trait Derivation {
-    // /// Generate salt from passphrase
-    // fn passphrase_to_salt(passphrase: &str) -> Result<[u8; 32], EncError> {
-    //     let pass: String = passphrase.nfc().collect();
-    //     let salt = "Thanks Satoshi!";
-    //     let params = scrypt::Params::new(20, 8, 8, 64)?;
-
-    //     let mut result = [0u8; 64];
-    //     scrypt::scrypt(pass.as_bytes(), salt.as_bytes(), &params, &mut result)?;
-    //     let (half1, half2) = result.split_at_mut(32);
-    //     half1.xor(half2);
-
-    //     Ok(half1[..32].try_into().unwrap())
-    // }
-
-    // /// Derive secret key from passphrase
-    // fn derive_secret_key(passphrase: &str) -> Result<[u8; 64], EncError> {
-    //     let argon = argon2::Argon2::default();
-    //     let pass: String = passphrase.nfc().collect();
-    //     let salt = Self::passphrase_to_salt(passphrase)?;
-
-    //     let mut secret_key = [0u8; 64];
-    //     argon.hash_password_into(pass.as_bytes(), &salt, &mut secret_key)?;
-    //     Ok(secret_key)
-    // }
-
-    fn generate_secret_key(passphrase: &str, salt: &[u8]) -> Result<[u8; 64], EncError> {
+    /// Derive a secret key from the passphrase and salt.
+    fn derive_secret_key(passphrase: &str, salt: &[u8]) -> Result<[u8; 64], EncError> {
         let pass: String = passphrase.nfc().collect();
         let argon_salt = {
             let scrypt_salt = ["Thanks Satoshi!".as_bytes(), salt].concat();
@@ -49,13 +25,13 @@ trait Derivation {
 }
 
 trait Encryption: Derivation + Sized {
+    /// Encrypt the mnemonic with a passphrase and salt, returning the new mnemonic and a verify word.
+    /// The salt is used to extend the mnemonic length, and the verify word is used to verify the decryption.
     fn encrypt_extend(&self, passphrase: &str, salt: &[u8]) -> Result<(Self, String), EncError>;
-    fn decrypt_extend(&self, passphrase: &str, verify: &str) -> Result<Self, EncError>;
 
-    // /// Keep original words count
-    // fn encrypt(&self, passphrase: &str) -> Result<(Self, String), EncError>;
-    // /// Decrypt encrypted nemonic
-    // fn decrypt(&self, passphrase: &str, verify: &str) -> Result<Self, EncError>;
+    /// Decrypt the mnemonic with a passphrase and verify word, returning the original mnemonic.
+    /// If the verify word is empty, it will ignore the checksum.
+    fn decrypt_extend(&self, passphrase: &str, verify: &str) -> Result<Self, EncError>;
 }
 
 impl Derivation for Mnemonic {}
@@ -64,7 +40,7 @@ impl Encryption for Mnemonic {
         let result_bytes = self.word_count() / 3 * 4 + salt.len();
         debug_assert!(matches!(result_bytes, 16 | 20 | 24 | 28 | 32));
 
-        let secret_key = Self::generate_secret_key(passphrase, salt)?;
+        let secret_key = Self::derive_secret_key(passphrase, salt)?;
         let (mask, aes_key) = secret_key.split_at(32);
 
         let entropy = &mut self.entropy();
@@ -113,7 +89,7 @@ impl Encryption for Mnemonic {
         let entropy = &mut self.entropy();
         {
             let salt: Vec<_> = entropy.drain(result_bytes..).collect();
-            let secret_key = Self::generate_secret_key(passphrase, &salt)?;
+            let secret_key = Self::derive_secret_key(passphrase, &salt)?;
             let (mask, aes_key) = secret_key.split_at(32);
 
             entropy.resize(32, 0);
@@ -135,72 +111,17 @@ impl Encryption for Mnemonic {
 
         Ok(original)
     }
-
-    // fn encrypt(&self, passphrase: &str) -> Result<(Self, String), EncError> {
-    //     let secret_key = Self::derive_secret_key(passphrase)?;
-    //     let (mask, aes_key) = secret_key.split_at(32);
-
-    //     let entropy = &mut self.entropy();
-    //     entropy.resize(32, 0);
-    //     {
-    //         entropy[..32].xor(&mask[..32]);
-    //         let (part1, part2) = entropy.split_at_mut(16);
-
-    //         let cipher = aes::Aes256::new(GenericArray::from_slice(aes_key));
-    //         cipher.encrypt_block(GenericArray::from_mut_slice(part1));
-    //         if self.word_count() == 24 {
-    //             cipher.encrypt_block(GenericArray::from_mut_slice(part2));
-    //         }
-    //     }
-
-    //     let out_bytes = self.word_count() / 3 * 4;
-    //     let mnemonic = Mnemonic::from_entropy(&entropy[..out_bytes], self.language())?;
-    //     let verify = {
-    //         let check_mask: u16 = 0x00ff >> (8 - self.word_count() / 3);
-    //         let checksum = self.entropy().sha256_n(2)[0] as u16 & check_mask;
-    //         let tail_idx = mnemonic.indices().last().unwrap() as u16 & !check_mask;
-    //         let verify_idx = (tail_idx | checksum) as usize;
-    //         self.language().word_at(verify_idx).unwrap().to_string()
-    //     };
-    //     Ok((mnemonic, verify))
-    // }
-
-    // fn decrypt(&self, passphrase: &str, verify: &str) -> Result<Self, EncError> {
-    //     let secret_key = Self::derive_secret_key(passphrase)?;
-    //     let (mask, aes_key) = secret_key.split_at(32);
-
-    //     let entropy = &mut self.entropy();
-    //     entropy.resize(32, 0);
-    //     {
-    //         let (part1, part2) = entropy.split_at_mut(16);
-
-    //         let cipher = aes::Aes256::new(GenericArray::from_slice(aes_key));
-    //         cipher.decrypt_block(GenericArray::from_mut_slice(part1));
-    //         if self.word_count() == 24 {
-    //             cipher.decrypt_block(GenericArray::from_mut_slice(part2));
-    //         }
-    //     }
-    //     entropy[..32].xor(&mask[..32]);
-
-    //     let out_bytes = self.word_count() / 3 * 4;
-    //     let original = Mnemonic::from_entropy(&entropy[..out_bytes], self.language())?;
-
-    //     if !verify.is_empty() {
-    //         // check verify
-    //         let check_mask: u16 = 0x00ff >> (8 - self.word_count() / 3);
-    //         let check_sum = original.entropy().sha256_n(2)[0] as u16 & check_mask;
-    //         let tail_idx = self.indices().last().unwrap() as u16 & !check_mask;
-    //         let verify_idx = (tail_idx | check_sum) as usize;
-    //         if Some(verify) != self.language().word_at(verify_idx) {
-    //             return Err(EncError::InvalidPass);
-    //         }
-    //     }
-    //     Ok(original)
-    // }
 }
 
 pub trait MnemonicEncryption {
+    /// Encrypt the mnemonic with a passphrase and desired word count.
+    /// The word count must be one of 12, 15, 18, 21, or 24.
+    /// The mnemonic will be extended with random words to match the desired count.
+    /// Returns the new mnemonic and a verify word for decryption.
     fn mnemonic_encrypt(&self, passphrase: &str, n: usize) -> Result<String, EncError>;
+
+    /// Decrypt the mnemonic with a passphrase.
+    /// If the mnemonic is encrypted with a verify word, it will be used to verify the decryption.
     fn mnemonic_decrypt(&self, passphrase: &str) -> Result<String, EncError>;
 }
 
