@@ -35,7 +35,7 @@ impl<const E: bool> crate::Execute for EncryptCommand<E> {
         } else {
             // mnemonic
             let result = match E {
-                true => self.key.mnemonic_encrypt(&password)?,
+                true => self.key.mnemonic_encrypt(&password, 24)?,
                 false => self.key.mnemonic_decrypt(&password)?,
             };
             println!("{result}");
