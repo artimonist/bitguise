@@ -24,9 +24,7 @@ trait Derivation {
         let salt = Self::passphrase_to_salt(passphrase)?;
 
         let mut secret_key = [0u8; 64];
-        argon
-            .hash_password_into(pass.as_bytes(), &salt, &mut secret_key)
-            .map_err(|e| EncError::ArgonError(e))?;
+        argon.hash_password_into(pass.as_bytes(), &salt, &mut secret_key)?;
         Ok(secret_key)
     }
 }
@@ -124,7 +122,7 @@ impl MnemonicEncryption for str {
                 let original = mnemonic.decrypt(passphrase, verify)?;
                 Ok(original.to_string())
             } else {
-                Err(EncError::InvalidWordCount(word_count))
+                Err(EncError::InvalidKey)
             }
         } else {
             let mnemonic: Mnemonic = self.parse()?;
@@ -136,19 +134,28 @@ impl MnemonicEncryption for str {
 
 #[derive(thiserror::Error, Debug)]
 pub enum EncError {
-    #[error("Invalid word count: {0}")]
-    InvalidWordCount(usize),
+    #[error("Invalid encrypted key")]
+    InvalidKey,
     #[error("Invalid passphrase")]
     InvalidPass,
+    #[error("Encrypt error: {0}")]
+    EncryptError(String),
     #[error("Mnemonic error: {0}")]
     MnemonicError(#[from] crate::MnemonicError),
-    #[error("Argon error: {0}")]
-    ArgonError(argon2::Error),
-    #[error("Scrypt error: {0}")]
-    ScryptParam(#[from] scrypt::errors::InvalidParams),
-    #[error("Scrypt error: {0}")]
-    ScryptOutput(#[from] scrypt::errors::InvalidOutputLen),
 }
+
+macro_rules! derive_error {
+    ($e:expr, $source:ty) => {
+        impl From<$source> for EncError {
+            fn from(e: $source) -> Self {
+                $e(e.to_string())
+            }
+        }
+    };
+}
+derive_error!(EncError::EncryptError, argon2::Error);
+derive_error!(EncError::EncryptError, scrypt::errors::InvalidOutputLen);
+derive_error!(EncError::EncryptError, scrypt::errors::InvalidParams);
 
 trait ByteOperation {
     fn sha256_n(&self, n: usize) -> [u8; 32];
