@@ -36,7 +36,7 @@ impl Mnemonic {
             24 => 18,
             28 => 21,
             32 => 24,
-            n @ _ => return Err(MnemonicError::InvalidCount(n)),
+            n => return Err(MnemonicError::InvalidCount(n)),
         };
 
         // calculate checksum

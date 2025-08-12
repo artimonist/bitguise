@@ -12,7 +12,7 @@ trait Derivation {
         let mut result = [0u8; 64];
         scrypt::scrypt(pass.as_bytes(), salt.as_bytes(), &params, &mut result)?;
         let (half1, half2) = result.split_at_mut(32);
-        half1.xor(&half2);
+        half1.xor(half2);
 
         Ok(half1[..32].try_into().unwrap())
     }
@@ -55,8 +55,8 @@ impl Encryption for Mnemonic {
             }
         }
 
-        let new_entropy = &entropy[..self.word_count() / 3 * 4];
-        let mnemonic = Mnemonic::from_entropy(&new_entropy, self.language())?;
+        let out_bytes = self.word_count() / 3 * 4;
+        let mnemonic = Mnemonic::from_entropy(&entropy[..out_bytes], self.language())?;
         let verify = {
             let check_mask: u16 = 0x00ff >> (8 - self.word_count() / 3);
             let checksum = self.entropy().sha256_n(2)[0] as u16 & check_mask;

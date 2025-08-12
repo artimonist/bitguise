@@ -1,15 +1,8 @@
-mod compress;
-// mod encrypt;
-mod search;
-mod transform;
+mod encrypt;
 mod translate;
 
-// use encrypt::EncryptCommand;
+use encrypt::EncryptCommand;
 use translate::TranslateCommand;
-
-pub trait Execute {
-    fn execute(&self) -> anyhow::Result<()>;
-}
 
 /// Disguise mnemonics and wallets in a simple way.
 #[derive(clap::Parser, Debug)]
@@ -23,12 +16,12 @@ pub struct Cli {
 pub enum Commands {
     /// Translate a mnemonic to a different language.
     Translate(TranslateCommand),
-    // Search mnemonic words from a given article.
-    // Search(SearchCommand),
+    /// Encrypt mnemonic or private key.
+    Encrypt(EncryptCommand<true>),
+    /// Decrypt mnemonic or private key.
+    Decrypt(EncryptCommand<false>),
+}
 
-    // Transform a mnemonic to another.
-    // Transform(TransformCommand),
-
-    // Encrypt mnemonic 12 to another mnemonic
-    // Encrypt(EncryptCommand),
+pub trait Execute {
+    fn execute(&self) -> anyhow::Result<()>;
 }
