@@ -1,7 +1,5 @@
-use std::str::FromStr;
-
-use anyhow::Ok;
 use disguise::Language;
+use std::str::FromStr;
 
 use crate::Execute;
 use crate::{Mnemonic, utils::select_language};
@@ -21,7 +19,6 @@ pub struct TranslateCommand {
 // get indices of the mnemonic words.
 // map indices to the target language words.
 // return the translated mnemonic as a string.
-
 impl Execute for TranslateCommand {
     fn execute(&self) -> anyhow::Result<()> {
         let mnemonic = Mnemonic::from_str(&self.mnemonic)?;
