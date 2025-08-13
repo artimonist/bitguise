@@ -3,12 +3,15 @@ use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArr
 use rand::RngCore;
 use unicode_normalization::UnicodeNormalization;
 
+const DEFAULT_SALT: &str = "Thanks Satoshi!";
+const DERIVE_PATH: &str = "m/0'/0'";
+
 trait Derivation {
     /// Derive a secret key from the passphrase and salt.
     fn derive_secret_key(passphrase: &str, salt: &[u8]) -> Result<[u8; 64], EncError> {
         let pass: String = passphrase.nfc().collect();
         let argon_salt = {
-            let scrypt_salt = ["Thanks Satoshi!".as_bytes(), salt].concat();
+            let scrypt_salt = [DEFAULT_SALT.as_bytes(), salt].concat();
             let params = scrypt::Params::new(20, 8, 8, 64)?;
             let mut result = [0u8; 64];
             scrypt::scrypt(pass.as_bytes(), &scrypt_salt, &params, &mut result)?;
@@ -21,6 +24,29 @@ trait Derivation {
         let mut secret_key = [0u8; 64];
         argon.hash_password_into(pass.as_bytes(), &argon_salt, &mut secret_key)?;
         Ok(secret_key)
+    }
+
+    fn derive_path_address(mnemonic: &Mnemonic, path: &str) -> Result<String, EncError> {
+        use bitcoin::bip32::{DerivationPath, Xpriv};
+        use bitcoin::{Address, Network, secp256k1::Secp256k1};
+        use pbkdf2::pbkdf2_hmac;
+
+        let seed = {
+            let mnemonic = mnemonic.to_string();
+            let salt = format!("mnemonic{DEFAULT_SALT}").into_bytes();
+            let mut seed = [0u8; 64];
+            pbkdf2_hmac::<sha2::Sha512>(mnemonic.as_bytes(), &salt, u32::pow(2, 11), &mut seed);
+            seed
+        };
+        let root = Xpriv::new_master(Network::Bitcoin, &seed)?;
+
+        let address = {
+            let derive_path: DerivationPath = path.parse()?;
+            let xpriv = root.derive_priv(&Secp256k1::default(), &derive_path)?;
+            let pub_key = xpriv.to_priv().public_key(&Secp256k1::default());
+            Address::p2pkh(&pub_key, Network::Bitcoin).to_string()
+        };
+        Ok(address)
     }
 }
 
@@ -61,7 +87,8 @@ impl Encryption for Mnemonic {
 
         let new_mnemonic = Mnemonic::from_entropy(entropy, self.language())?;
         let verify_word = {
-            let checksum: u16 = self.entropy().sha256_n(2)[0] as u16;
+            let address = Self::derive_path_address(&self, DERIVE_PATH)?;
+            let checksum: u16 = address.as_bytes().sha256_n(2)[0] as u16;
             let count_flag: u16 = 8 - self.word_count() as u16 / 3; // 4 | 3 | 2 | 1 | 0
             let verify_idx = (count_flag << 8 | checksum) as usize;
             debug_assert!(verify_idx < 2048);
@@ -105,10 +132,12 @@ impl Encryption for Mnemonic {
         }
 
         let original = Mnemonic::from_entropy(entropy, self.language())?;
-        if checksum.is_some() && checksum != Some(entropy.sha256_n(2)[0]) {
-            return Err(EncError::InvalidPass);
+        if checksum.is_some() {
+            let address = Self::derive_path_address(&original, DERIVE_PATH)?;
+            if checksum != Some(address.as_bytes().sha256_n(2)[0]) {
+                return Err(EncError::InvalidPass);
+            }
         }
-
         Ok(original)
     }
 }
@@ -128,14 +157,16 @@ pub trait MnemonicEncryption {
 impl MnemonicEncryption for str {
     fn mnemonic_encrypt(&self, passphrase: &str, n: usize) -> Result<String, EncError> {
         let original: Mnemonic = self.parse()?;
-        if !matches!(n, 12 | 15 | 18 | 21 | 24) || n < original.word_count() {
+        let count = if n == 0 { original.word_count() } else { n };
+        if !matches!(count, 12 | 15 | 18 | 21 | 24) || count < original.word_count() {
             return Err(EncError::InvalidCount);
         }
 
-        let salt = &mut vec![0u8; (n - original.word_count()) / 3 * 4];
+        let salt = &mut vec![0u8; (count - original.word_count()) / 3 * 4];
         if !salt.is_empty() {
             rand::thread_rng().fill_bytes(salt);
         }
+
         let (mnemonic, verify) = original.encrypt_extend(passphrase, salt)?;
         Ok(format!("{mnemonic}; {verify}"))
     }
@@ -185,6 +216,7 @@ macro_rules! derive_error {
 derive_error!(EncError::EncryptError, argon2::Error);
 derive_error!(EncError::EncryptError, scrypt::errors::InvalidOutputLen);
 derive_error!(EncError::EncryptError, scrypt::errors::InvalidParams);
+derive_error!(EncError::EncryptError, bitcoin::bip32::Error);
 
 trait ByteOperation {
     fn sha256_n(&self, n: usize) -> [u8; 32];
@@ -219,15 +251,24 @@ mod tests {
     fn test_mnemonic_encrypt() {
         const TEST_DATA: &[&str] = &[
             "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔",
-            "坏 火 发 恐 晒 为 陕 伪 镜 锻 略 越 力 秦 音; 歌",
+            "坏 火 发 恐 晒 为 陕 伪 镜 锻 略 越 力 秦 音; 胞",
         ];
         for data in TEST_DATA.chunks(2) {
-            assert_eq!(data[0].mnemonic_encrypt("123456", 15).unwrap(), data[1]);
+            assert_eq!(data[0].mnemonic_encrypt("123456", 0).unwrap(), data[1]);
             assert_eq!(data[1].mnemonic_decrypt("123456").unwrap(), data[0]);
+
             let mnemonic = data[1].rsplit_once(';').unwrap().0;
             assert_eq!(mnemonic.mnemonic_decrypt("123456").unwrap(), data[0]);
             let mnemonic = data[1].replace(';', "");
             assert_eq!(mnemonic.mnemonic_decrypt("123456").unwrap(), data[0]);
         }
+    }
+
+    #[test]
+    fn test_mnemonic_extend() {
+        let data = "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔";
+        let encrypted = data.mnemonic_encrypt("123456", 24).unwrap();
+        assert_eq!(encrypted.mnemonic_decrypt("123456").unwrap(), data);
+        println!("Encrypted: {}", encrypted);
     }
 }
