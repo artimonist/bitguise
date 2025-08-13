@@ -16,9 +16,9 @@ pub struct Cli {
 pub enum Commands {
     /// Translate a mnemonic to a different language.
     Translate(TranslateCommand),
-    /// Encrypt mnemonic or private key.
+    /// Encrypt mnemonic to another.
     Encrypt(EncryptCommand<true>),
-    /// Decrypt mnemonic or private key.
+    /// Decrypt mnemonic.
     Decrypt(EncryptCommand<false>),
 }
 
