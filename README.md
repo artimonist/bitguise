@@ -49,3 +49,5 @@ flowchart TD
   `disguise decrypt "栽 刮 铒 兴 粗 雪 玄 果 权 圣 吃 化" --password "Thanks Satoshi!"`  
   "访 案 硬 姻 逆 粗 框 但 塞 币 叫 黄"
 </details>
+
+[See how it works?](docs/mnemonic_encrypt.mmd)
