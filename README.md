@@ -1,4 +1,4 @@
-# Artimonist disguise
+# [Artimonist](https://github.com/artimonist) disguise
 Disguise mnemonics and wallets in a simple way.
 
 ```mermaid
@@ -10,8 +10,8 @@ flowchart TD
     Y(storage mnemonic)
     Z(disguise mnemonic)
 
-    Y -->|complex pwd| X
-    Y -->|simple pwd| Z
+    Y -->|complex passphrase| X
+    Y -->|simple passphrase| Z
     X --> main_wallets
     Z --> change_wallets
 
