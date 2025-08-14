@@ -11,7 +11,7 @@ pub struct TranslateCommand {
     pub mnemonic: String,
 
     /// The target language for the translation.
-    #[clap(hide = true, long = "target")]
+    #[clap(hide = true, long = "language")]
     pub language: Option<Language>,
 }
 
