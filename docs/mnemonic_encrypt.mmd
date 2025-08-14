@@ -1,0 +1,35 @@
+---
+title: Mnemonic encrypt
+---
+flowchart TD
+    S1(["scrypt(20, 8, 8, 64)"])
+    A1(["aes_256()"])
+    X1(["xor()"])
+    AG(["argon2()"])
+
+    subgraph derive_secret_key
+        passphrase -->|nfc| S1 -->|xor| AG
+        salt --> S1
+        passphrase -->|nfc| AG --> secret_key
+    end
+
+    secret_key --> mask & aes_key
+    mnemonic --> entropy
+    entropy & mask --> X1 --> part1 & part2
+    part1 & aes_key --> A1 --> epart1
+    part2 -->|"if word_count == 24 { aes_256() }"| epart2
+    epart1 & epart2 --> new_entropy --> new_mnemonic
+
+    subgraph new_entropy
+      direction LR
+      E1[epart1] --- E2[epart2] --- SX[salt]
+    end
+
+    mnemonic -->|"word count"| verify_word
+    address -->|"sha256(2)"| checksum --> verify_word
+
+    subgraph derive_path_address
+        mnemonic -->|bip39| master_key -->|bip32| path(["m/0'/0'"]) -->|p2pkh| address
+    end
+
+
