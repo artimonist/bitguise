@@ -27,7 +27,16 @@ impl<const E: bool> crate::Execute for EncryptCommand<E> {
         let count = self.count.unwrap_or(0) as usize;
         let result = match E {
             true => self.mnemonic.mnemonic_encrypt(&password, count)?,
-            false => self.mnemonic.mnemonic_decrypt(&password)?,
+            false => {
+                let word_count = self.mnemonic.split_whitespace().count();
+                if count != 0 && matches!(word_count, 12 | 15 | 18 | 21 | 24) {
+                    let mnemonic = format!("{}; {count}", self.mnemonic);
+                    println!("Mnemonic: {mnemonic}");
+                    mnemonic.mnemonic_decrypt(&password)?
+                } else {
+                    self.mnemonic.mnemonic_decrypt(&password)?
+                }
+            }
         };
         println!("{result}");
         Ok(())
