@@ -10,7 +10,7 @@ fn language_common_count() {
     (0..langs.len()).for_each(|i| {
         (i + 1..langs.len()).for_each(|j| {
             let (x, y) = (langs[i], langs[j]);
-            let n = x.wordlist().filter(|w| y.index_of(w).is_some()).count();
+            let n = x.word_list().filter(|w| y.index_of(w).is_some()).count();
             if n > 0 {
                 repeats.push((x, y, n));
             }

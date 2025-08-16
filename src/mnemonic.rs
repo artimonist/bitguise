@@ -6,6 +6,109 @@ use unicode_normalization::UnicodeNormalization;
 const DEFAULT_SALT: &str = "Thanks Satoshi!";
 const DERIVE_PATH: &str = "m/0'/0'";
 
+struct MnemonicEx {
+    pub mnemonic: Mnemonic,
+    pub verify: Verify,
+}
+
+enum Verify {
+    Word(usize),
+    Count(u8),
+}
+
+impl MnemonicEx {
+    pub fn desired_count(&self) -> usize {
+        match self.verify {
+            Verify::Word(i) => 8 - (i >> 8) * 3,
+            Verify::Count(n) => n as usize,
+        }
+    }
+    pub fn verify_sum(&self) -> Option<u8> {
+        match self.verify {
+            Verify::Word(i) => Some((i & 0xff) as u8),
+            Verify::Count(_) => None,
+        }
+    }
+    // pub fn verify_str(&self) -> String {
+    //     match self.verify {
+    //         Verify::Word(i) => self.mnemonic.language().word_at(i).unwrap().to_string(),
+    //         Verify::Count(n) => format!("{n}"),
+    //     }
+    // }
+    // pub fn verify_word(&self) -> Option<&str> {
+    //     match self.verify {
+    //         Verify::Word(i) => self.mnemonic.language().word_at(i),
+    //         Verify::Count(_) => None,
+    //     }
+    // }
+}
+
+impl std::ops::Deref for MnemonicEx {
+    type Target = Mnemonic;
+
+    fn deref(&self) -> &Self::Target {
+        &self.mnemonic
+    }
+}
+
+impl From<Mnemonic> for MnemonicEx {
+    fn from(mnemonic: Mnemonic) -> Self {
+        let verify = Verify::Count(mnemonic.size() as u8);
+        Self { mnemonic, verify }
+    }
+}
+
+impl std::fmt::Display for MnemonicEx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.mnemonic)?;
+        match self.verify {
+            Verify::Word(i) => {
+                if let Some(w) = self.language().word_at(i) {
+                    write!(f, "; {w}")?;
+                }
+            }
+            Verify::Count(n) => {
+                if n as usize != self.size() {
+                    write!(f, "; {n}")?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::str::FromStr for MnemonicEx {
+    type Err = EncError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let count = s.split_whitespace().count();
+        if matches!(count, 12 | 15 | 18 | 21 | 24) {
+            // none verify word
+            return Ok(s.parse::<Mnemonic>()?.into());
+        }
+        // has verify word or desired count
+        let Some((mnemonic_str, verify_str)) = s.rsplit_once(' ') else {
+            return Err(EncError::InvalidKey);
+        };
+        let mnemonic: Mnemonic = mnemonic_str.trim_end_matches(';').parse()?;
+        let verify = if let Some(i) = mnemonic.language().index_of(verify_str)
+            && i >> 8 < 5
+        {
+            // valid verify word
+            Verify::Word(i)
+        } else if let Ok(n) = verify_str.parse::<u8>()
+            && matches!(n, 12 | 15 | 18 | 21 | 24)
+            && (n as usize) <= mnemonic.size()
+        {
+            // desired word count
+            Verify::Count(n)
+        } else {
+            return Err(EncError::InvalidKey);
+        };
+        Ok(Self { mnemonic, verify })
+    }
+}
+
 trait Derivation {
     /// Derive a secret key from the passphrase and salt.
     fn derive_secret_key(passphrase: &str, salt: &[u8]) -> Result<[u8; 64], EncError> {
@@ -68,7 +171,7 @@ trait Encryption: Derivation + Sized {
 impl Derivation for Mnemonic {}
 impl Encryption for Mnemonic {
     fn encrypt_extend(&self, passphrase: &str, salt: &[u8]) -> Result<(Self, String), EncError> {
-        let result_bytes = self.word_count() / 3 * 4 + salt.len();
+        let result_bytes = self.size() / 3 * 4 + salt.len();
         debug_assert!(matches!(result_bytes, 16 | 20 | 24 | 28 | 32));
 
         let secret_key = Self::derive_secret_key(passphrase, salt)?;
@@ -82,11 +185,11 @@ impl Encryption for Mnemonic {
 
             let cipher = aes::Aes256::new(GenericArray::from_slice(aes_key));
             cipher.encrypt_block(GenericArray::from_mut_slice(part1));
-            if self.word_count() == 24 {
+            if self.size() == 24 {
                 cipher.encrypt_block(GenericArray::from_mut_slice(part2));
             }
 
-            entropy.resize(self.word_count() / 3 * 4, 0);
+            entropy.resize(self.size() / 3 * 4, 0);
             entropy.extend_from_slice(salt);
         }
 
@@ -94,7 +197,7 @@ impl Encryption for Mnemonic {
         let verify_word = {
             let address = Self::derive_path_address(&self, DERIVE_PATH)?;
             let checksum: u16 = address.as_bytes().sha256_n(2)[0] as u16;
-            let count_flag: u16 = 8 - self.word_count() as u16 / 3; // 4 | 3 | 2 | 1 | 0
+            let count_flag: u16 = 8 - self.size() as u16 / 3; // 4 | 3 | 2 | 1 | 0
             let verify_idx = (count_flag << 8 | checksum) as usize;
             debug_assert!(verify_idx < 2048);
             self.language().word_at(verify_idx).unwrap().to_string()
@@ -104,14 +207,14 @@ impl Encryption for Mnemonic {
 
     fn decrypt_extend(&self, passphrase: &str, verify: &str) -> Result<Self, EncError> {
         let (result_bytes, checksum) = if verify.is_empty() {
-            (self.word_count() / 3 * 4, None)
+            (self.size() / 3 * 4, None)
         } else if let Some(i) = self.language().index_of(verify)
             && i >> 8 < 5
         {
             ((8 - (i >> 8)) * 4, Some((i & 0xff) as u8))
         } else if let Ok(n) = u16::from_str_radix(verify, 10)
             && matches!(n, 12 | 15 | 18 | 21 | 24)
-            && (n as usize) <= self.word_count()
+            && (n as usize) <= self.size()
         {
             (n as usize / 3 * 4, None)
         } else {
@@ -166,14 +269,14 @@ impl MnemonicEncryption for str {
         let original: Mnemonic = self.parse()?;
 
         // Validate the desired word count.
-        let count = if n == 0 { original.word_count() } else { n };
-        if !matches!(count, 12 | 15 | 18 | 21 | 24) || count < original.word_count() {
+        let count = if n == 0 { original.size() } else { n };
+        if !matches!(count, 12 | 15 | 18 | 21 | 24) || count < original.size() {
             return Err(EncError::InvalidCount);
         }
 
         // Generate a random salt if the desired count is greater than the original.
         // The salt will be used to extend the mnemonic length.
-        let salt = &mut vec![0u8; (count - original.word_count()) / 3 * 4];
+        let salt = &mut vec![0u8; (count - original.size()) / 3 * 4];
         if !salt.is_empty() {
             rand::thread_rng().fill_bytes(salt);
         }

@@ -40,7 +40,7 @@ impl Language {
         ]
     }
 
-    pub fn wordlist(&self) -> impl Iterator<Item = &str> {
+    pub fn word_list(&self) -> impl Iterator<Item = &'static str> {
         match self {
             Self::ChineseSimplified => CHINESE_SIMPLIFIED.split_whitespace(),
             Self::ChineseTraditional => CHINESE_TRADITIONAL.split_whitespace(),
@@ -55,16 +55,16 @@ impl Language {
         }
     }
 
-    pub fn word_at(&self, index: usize) -> Option<&str> {
+    pub fn word_at(&self, index: usize) -> Option<&'static str> {
         if index < 2048 {
-            Some(self.wordlist().nth(index).unwrap())
+            Some(self.word_list().nth(index).unwrap())
         } else {
             None
         }
     }
 
     pub fn index_of(&self, word: &str) -> Option<usize> {
-        self.wordlist().position(|w| w == word)
+        self.word_list().position(|w| w == word)
     }
 
     /// detect word languages
@@ -125,7 +125,7 @@ mod tests {
     fn test_language_length() {
         // words count
         for lang in Language::all() {
-            assert_eq!(lang.wordlist().count(), 2048, "{lang:?}");
+            assert_eq!(lang.word_list().count(), 2048, "{lang:?}");
         }
     }
 }

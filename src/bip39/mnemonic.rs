@@ -9,17 +9,6 @@ pub struct Mnemonic {
 }
 
 impl Mnemonic {
-    const fn check_mask(len: usize) -> u8 {
-        match len {
-            12 => 0b1111_0000,
-            15 => 0b1111_1000,
-            18 => 0b1111_1100,
-            21 => 0b1111_1110,
-            24 => 0b1111_1111,
-            _ => unreachable!(),
-        }
-    }
-
     /// Create a new mnemonic from raw entropy and language.
     /// # Arguments
     /// * `entropy` - A byte slice representing the entropy.  
@@ -40,7 +29,8 @@ impl Mnemonic {
         };
 
         // calculate checksum
-        let checksum = Sha256::digest(entropy)[0] & Mnemonic::check_mask(length);
+        let check_mask = 0xff << (8 - length / 3);
+        let checksum = Sha256::digest(entropy)[0] & check_mask;
 
         // convert entropy to indices
         let indices: Vec<usize> = [entropy.to_vec(), vec![checksum]]
@@ -61,14 +51,14 @@ impl Mnemonic {
 
     /// Mnemonic words count.
     #[inline(always)]
-    pub fn word_count(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.words.len()
     }
 
     /// Get the mnemonic words.
     #[inline(always)]
-    pub fn words(&self) -> impl Iterator<Item = &String> {
-        self.words.iter()
+    pub fn words(&self) -> impl Iterator<Item = &str> {
+        self.words.iter().map(|s| s.as_str())
     }
 
     #[inline(always)]
@@ -120,7 +110,8 @@ impl Mnemonic {
 
         let mut entropy = Vec::from_bits_chunk(indices.iter().copied(), 11);
         let tail = entropy.pop().unwrap();
-        let checksum = Sha256::digest(&entropy)[0] & Mnemonic::check_mask(indices.len());
+        let check_mask = 0xff << (8 - indices.len() / 3);
+        let checksum = Sha256::digest(&entropy)[0] & check_mask;
 
         // verify checksum
         if checksum != tail {
