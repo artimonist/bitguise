@@ -284,7 +284,7 @@ impl MnemonicEncryption for str {
 
 #[derive(thiserror::Error, Debug)]
 pub enum EncError {
-    #[error("Invalid encrypted key")]
+    #[error("Invalid key")]
     InvalidKey,
     #[error("Invalid count")]
     InvalidSize,

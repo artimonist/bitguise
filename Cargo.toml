@@ -1,6 +1,6 @@
 [package]
 name = "disguise"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 
 description = "Disguise mnemonics and wallets in a simple way."
@@ -16,21 +16,20 @@ name = "disguise"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive", "env"] }
-inquire = "0.7.5"
-thiserror = "2.0.12"
-anyhow = "1.0.98"
-xbits = "0.8.0"
-unicode-normalization = "0.1.24"
-bitcoin = "0.32.6"
-aes = "0.8.4"
-scrypt = "0.11.0"
-sha2 = "0.10.9"
+inquire = "0.7"
+thiserror = "2"
+anyhow = "1"
+xbits = "0.8"
+bitcoin = "0.32"
+unicode-normalization = "0.1"
+aes = "0.8"
+sha2 = "0.10"
+scrypt = "0.11"
+pbkdf2 = "0.12"
+argon2 = "0.5"
 rand = "0.8"
-argon2 = "0.5.3"
-pbkdf2 = "0.12.2"
 
 [dev-dependencies]
-assert_cmd = "2.0.17"
-bitcoin = "0.32.6"
-hex = "0.4.3"
-itertools = "0.14.0"
+assert_cmd = "2"
+hex = "0.4"
+itertools = "0.14"

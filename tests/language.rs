@@ -46,6 +46,22 @@ fn language_common_diff() {
     }
 }
 
+#[ignore = "pre test"]
+#[test]
+fn language_nfc_words() {
+    use unicode_normalization::UnicodeNormalization;
+
+    for lang in Language::all() {
+        println!("{lang}");
+        for word in lang.word_list() {
+            let nfc: String = word.nfc().collect();
+            if nfc != word {
+                print!("{word} != {nfc}; ");
+            }
+        }
+    }
+}
+
 #[test]
 fn language_comman_mnemonic() {
     // test if a mnemonic has two language and verified checksum
