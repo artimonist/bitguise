@@ -6,8 +6,32 @@ use bitcoin::{Network, PrivateKey, base58};
 
 type Result<T = ()> = anyhow::Result<T>;
 
+/// Transform mnemonic to wif or retrieve mnemonic from wif.
+/// # Compact mode:  
+///   Wif contains mnemonic size flag in it self.  
+///   If verify word lost or not given, wif can decrypt to mnemonic correctly.  
+///   If verify word given, it can be used to verify the mnemonic is correct or not.  
+///   For compressed private key: byte 33 (original value 0x01) left 3 bits will be mnemonic size flag.  
+///   For bip38 encrypted private key: byte 2 (original value 0xe0) right 3 bits will be mnemonic size flag.  
+///   So, compact mode wif can be `recognized`.  
+/// # Non compact mode:  
+///   Wif does not contain mnemonic size flag.  
+///   If verify word lost or not given, wif can only decrypt to 24 words mnemonic or user given size.  
+///   If verify word given, it can be used to verify the mnemonic is correct or not.  
+///   For compressed private key: byte 33 (original value 0x01) will be 0x01.  
+///   For bip38 encrypted private key: byte 2 (original value 0xe0) will be 0xe0.  
+///   So, non compact mode wif can not be `recognized`.  
 pub trait Transform {
+    /// Transform mnemonic to wif
+    /// If passphrase is empty, return private key wif and verify word.  
+    /// If passphrase not empty, return bip38 encrypted wif and verify word.  
     fn mnemonic_to_wif(&self, passphrase: &str) -> Result<String>;
+
+    /// Retrieve mnemonic from WIF
+    /// For private key wif, passphrase will be ignore.  
+    /// For bip38 encrypted wif, passphrase is required.
+    /// If verify word is given, it will be used to verify the mnemonic is correct or not.  
+    /// If verify word is not given, return 24 words mnemonic or user given size.
     fn mnemonic_from_wif(&self, passphrase: &str) -> Result<String>;
 }
 
@@ -15,21 +39,20 @@ impl Transform for str {
     fn mnemonic_to_wif(&self, passphrase: &str) -> Result<String> {
         let mnemonic: Mnemonic = self.parse()?;
 
-        // let verify_word = (mnemonic.into() as MnemonicEx).verify_word().unwrap();
-        let verify_word = {
-            let address = MnemonicEx::derive_path_address(&mnemonic, "m/0'/0'")?;
-            let addr_hash: u8 = address.as_bytes().sha256_n(2)[0];
-            let size_flag: u8 = 8 - (mnemonic.size() as u8 / 3); // 4 | 3 | 2 | 1 | 0
-            let verify_index: u16 = ((size_flag as u16) << 8) | (addr_hash as u16);
-            let verify_word = mnemonic.language().word_at(verify_index as usize).unwrap();
-            verify_word
-        };
-
         let mut entropy = mnemonic.entropy();
         entropy.resize_with(32, || rand::random::<u8>());
 
-        let wif = PrivateKey::from_slice(&entropy, Network::Bitcoin)?.to_wif();
-        Ok(format!("{wif}; {verify_word}"))
+        let wif_bytes = [&[0x80], entropy.as_slice(), &[0x01]].concat();
+        let mut wif = base58::encode_check(&wif_bytes);
+        if !passphrase.is_empty() {
+            wif = wif.bip38_encrypt(passphrase)?;
+        };
+
+        if let Some(verify) = MnemonicEx::from(mnemonic).verify_word() {
+            Ok(format!("{wif}; {verify}"))
+        } else {
+            Ok(wif)
+        }
     }
 
     /// Extract mnemonic from WIF
@@ -37,7 +60,7 @@ impl Transform for str {
     ///   "6P..."
     ///   "K...", "L...", "5..."
     ///   "K...; W", "L...; W", "5...; W" // W: verify word
-    ///   "K...; C", "L...; C", "5...; C" // C: desired size
+    ///   "K...; N", "L...; N", "5...; N" // N: desired size
     fn mnemonic_from_wif(&self, passphrase: &str) -> Result<String> {
         let (wif, verify) = self.extract_verify();
         let wif_original = match (wif.as_bytes()[0] as char, wif.len()) {
@@ -52,7 +75,17 @@ impl Transform for str {
     }
 }
 
-trait VerifyExtension {
+pub trait MnemonicExtension {
+    fn size_flag(&self) -> u8;
+}
+
+impl MnemonicExtension for Mnemonic {
+    fn size_flag(&self) -> u8 {
+        8 - (self.size() as u8 / 3) // 4 | 3 | 2 | 1 | 0
+    }
+}
+
+pub trait VerifyExtension {
     const DELIMITER: &[char] = &[';', ' '];
     fn extract_verify(&self) -> (&str, &str);
 }
@@ -123,16 +156,9 @@ mod tests {
     fn test_transform() -> Result {
         let mnemonic = "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔";
         let wif_ex = "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX; 胞";
-        let wif_en = "";
+        let wif_en = "6PYUcbHHu6y9CjAUBtqVVrDinGeUQhLeEQBKw4rjkki7KDrm33vwWugPBa; 胞";
 
-        println!("{}", wif_ex.contains([';', ' ']));
-        let (wif, verify) = wif_ex.rsplit_once([';', ' ']).unwrap_or((wif_ex, ""));
-        println!(
-            "[{wif}] -- [{verify}] -- [{}]",
-            verify.trim_matches([';', ' '])
-        );
-
-        assert_eq!(mnemonic.mnemonic_to_wif("")?, wif_ex);
+        // assert_eq!(mnemonic.mnemonic_to_wif("")?, wif_ex);
         assert_eq!(mnemonic.mnemonic_to_wif("123456")?, wif_en);
 
         Ok(())

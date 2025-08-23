@@ -37,6 +37,9 @@ impl MnemonicEx {
             Verify::Size(_) => None,
         }
     }
+    pub fn size_flag(&self) -> u8 {
+        8 - (self.mnemonic.size() as u8 / 3) // 4 | 3 | 2 | 1 | 0
+    }
 }
 
 impl std::ops::Deref for MnemonicEx {
@@ -49,9 +52,15 @@ impl std::ops::Deref for MnemonicEx {
 
 impl From<Mnemonic> for MnemonicEx {
     fn from(mnemonic: Mnemonic) -> Self {
-        // Todo: Generate verify word
-        let verify = Verify::Size(mnemonic.size() as u8);
-        Self { mnemonic, verify }
+        if let Ok(address) = Self::derive_path_address(&mnemonic, DERIVE_PATH) {
+            let addr_hash: u8 = address.as_bytes().sha256_n(2)[0];
+            let size_flag: u8 = 8 - (mnemonic.size() as u8 / 3); // 4 | 3 | 2 | 1 | 0
+            let verify_index: u16 = ((size_flag as u16) << 8) | (addr_hash as u16);
+            let verify = Verify::Word(verify_index as usize);
+            Self { mnemonic, verify }
+        } else {
+            unreachable!("mnemonic derive failed!");
+        }
     }
 }
 
