@@ -10,8 +10,10 @@ const PRE_NON_EC: [u8; 2] = [0x01, 0x42];
 /// Prefix of all ec encrypted keys.
 const PRE_EC: [u8; 2] = [0x01, 0x43];
 
+type Result<T = ()> = std::result::Result<T, Error>;
+
 pub trait NoneEc {
-    fn encrypt_non_ec(wif: &str, passphrase: &str) -> Result<String, Bip38Error> {
+    fn encrypt_non_ec(wif: &str, passphrase: &str) -> Result<String> {
         let prvk = PrivateKey::from_wif(wif)?;
         let compress = prvk.compressed;
         let salt = prvk.p2pkh()?.as_bytes().sha256_n(2)[0..4].to_vec();
@@ -35,10 +37,10 @@ pub trait NoneEc {
             (part1, part2)
         };
 
-        let compress: [u8; 1] = if compress { [0xe0] } else { [0xc0] };
+        let flag: [u8; 1] = if compress { [0xe0] } else { [0xc0] };
         let buffer = [
             &PRE_NON_EC[..2],
-            &compress[..1],
+            &flag[..1],
             &salt[..4],
             &part1[..16],
             &part2[..16],
@@ -47,10 +49,10 @@ pub trait NoneEc {
         Ok(base58::encode_check(&buffer))
     }
 
-    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<String, Bip38Error> {
+    fn decrypt_non_ec(wif: &str, passphrase: &str) -> Result<String> {
         let mut ebuffer = base58::decode_check(wif)?;
         if ebuffer.len() != 39 || ebuffer[..2] != PRE_NON_EC {
-            return Err(Bip38Error::InvalidKey);
+            return Err(Error::InvalidKey);
         }
         let [ref flag, ref salt, epart1, epart2] = ebuffer[2..].segments_mut([1, 4, 16, 16]);
         let compress = flag[0] & 0x20 == 0x20;
@@ -78,7 +80,7 @@ pub trait NoneEc {
 
         // Verify the checksum
         if *salt != &prvk.p2pkh()?.as_bytes().sha256_n(2)[..4] {
-            return Err(Bip38Error::InvalidPassphrase);
+            return Err(Error::InvalidPassphrase);
         }
         Ok(prvk.to_string())
     }
@@ -91,12 +93,7 @@ pub trait EcMultiply {
     /// EC_PASS not has "lot" and "sequence".
     const PRE_EC_PASS_NON: [u8; 8] = [0x2C, 0xE9, 0xB3, 0xE1, 0xFF, 0x39, 0xE2, 0x53];
 
-    fn generate_ec_factor(
-        passphrase: &str,
-        salt: [u8; 8],
-        lot: u32,
-        seq: u32,
-    ) -> Result<String, Bip38Error> {
+    fn generate_ec_factor(passphrase: &str, salt: [u8; 8], lot: u32, seq: u32) -> Result<String> {
         match (lot, seq) {
             (100000..=999999, 1..=4095) => {
                 let salt = salt[..4].to_vec();
@@ -145,18 +142,18 @@ pub trait EcMultiply {
                 .concat();
                 Ok(base58::encode_check(&ec_pass))
             }
-            _ => Err(Bip38Error::InvalidEcNumber(lot, seq)),
+            _ => Err(Error::InvalidEcNumber(lot, seq)),
         }
     }
 
-    fn generate_ec_key(seed: [u8; 24], ec_factor: &str) -> Result<String, Bip38Error> {
+    fn generate_ec_key(seed: [u8; 24], ec_factor: &str) -> Result<String> {
         let compress = true;
         let ec_pass = base58::decode_check(ec_factor)?;
         let [ec_pre, entropy, pass_point] = ec_pass.segments([8, 8, 33]);
         let lot_seq = match ec_pre {
             v if v == Self::PRE_EC_PASS_SEQ => true,
             v if v == Self::PRE_EC_PASS_NON => false,
-            _ => return Err(Bip38Error::InvalidEcFactor),
+            _ => return Err(Error::InvalidEcFactor),
         };
 
         let address_hash = {
@@ -200,10 +197,10 @@ pub trait EcMultiply {
         Ok(base58::encode_check(&result))
     }
 
-    fn decrypt_ec_key(wif_ec_key: &str, passphrase: &str) -> Result<String, Bip38Error> {
+    fn decrypt_ec_key(wif_ec_key: &str, passphrase: &str) -> Result<String> {
         let ebuffer = base58::decode_check(wif_ec_key)?;
         if ebuffer.len() != 39 || ebuffer[..2] != PRE_EC {
-            return Err(Bip38Error::InvalidKey);
+            return Err(Error::InvalidKey);
         }
         let [flag, address_hash, entropy, epart1, epart2] = ebuffer[2..].segments([1, 4, 8, 8, 16]);
         let (compress, lot_seq) = (flag[0] & 0x20 == 0x20, flag[0] & 0x04 == 0x04);
@@ -256,7 +253,7 @@ pub trait EcMultiply {
 
         // checksum
         if address_hash != &prvk.p2pkh()?.as_bytes().sha256_n(2)[..4] {
-            return Err(Bip38Error::InvalidPassphrase);
+            return Err(Error::InvalidPassphrase);
         }
         Ok(prvk.to_string())
     }
@@ -268,22 +265,22 @@ pub trait EcMultiply {
 ///  [Description](https://blockcoach.com/2023/202306/2023-06-20-A-BIP38/)
 ///  [Implementation](https://github.com/ceca69ec/bip38)
 pub trait Bip38: NoneEc + EcMultiply {
-    fn bip38_encrypt(&self, passphrase: &str) -> Result<String, Bip38Error>;
-    fn bip38_decrypt(&self, passphrase: &str) -> Result<String, Bip38Error>;
-    fn bip38_ec_factor(&self, lot: u32, seq: u32) -> Result<String, Bip38Error>;
-    fn bip38_ec_generate(&self) -> Result<String, Bip38Error>;
+    fn bip38_encrypt(&self, passphrase: &str) -> Result<String>;
+    fn bip38_decrypt(&self, passphrase: &str) -> Result<String>;
+    fn bip38_ec_factor(&self, lot: u32, seq: u32) -> Result<String>;
+    fn bip38_ec_generate(&self) -> Result<String>;
 }
 
 impl NoneEc for str {}
 impl EcMultiply for str {}
 impl Bip38 for str {
     #[inline(always)]
-    fn bip38_encrypt(&self, passphrase: &str) -> Result<String, Bip38Error> {
+    fn bip38_encrypt(&self, passphrase: &str) -> Result<String> {
         Self::encrypt_non_ec(self, passphrase)
     }
 
     #[inline(always)]
-    fn bip38_decrypt(&self, passphrase: &str) -> Result<String, Bip38Error> {
+    fn bip38_decrypt(&self, passphrase: &str) -> Result<String> {
         if self.starts_with("6P") && self.len() == 58 {
             let pre = base58::decode_check(self)?[..2].to_vec();
             if pre == PRE_NON_EC {
@@ -292,18 +289,18 @@ impl Bip38 for str {
                 return Self::decrypt_ec_key(self, passphrase);
             }
         }
-        Err(Bip38Error::InvalidKey)
+        Err(Error::InvalidKey)
     }
 
     #[inline]
-    fn bip38_ec_factor(&self, lot: u32, seq: u32) -> Result<String, Bip38Error> {
+    fn bip38_ec_factor(&self, lot: u32, seq: u32) -> Result<String> {
         let mut salt = [0u8; 8];
         rand::thread_rng().fill_bytes(&mut salt);
         Self::generate_ec_factor(self, salt, lot, seq)
     }
 
     #[inline]
-    fn bip38_ec_generate(&self) -> Result<String, Bip38Error> {
+    fn bip38_ec_generate(&self) -> Result<String> {
         let mut seed = [0u8; 24];
         rand::thread_rng().fill_bytes(&mut seed);
         Self::generate_ec_key(seed, self)
@@ -311,7 +308,7 @@ impl Bip38 for str {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Bip38Error {
+pub enum Error {
     #[error("Invalid BIP38 encrypted key")]
     InvalidKey,
     #[error("Invalid passphrase")]
@@ -330,19 +327,19 @@ pub enum Bip38Error {
 
 macro_rules! derive_error {
     ($e:expr, $source:ty) => {
-        impl From<$source> for Bip38Error {
+        impl From<$source> for Error {
             fn from(e: $source) -> Self {
                 $e(e.to_string())
             }
         }
     };
 }
-derive_error!(Bip38Error::InnerError, aes::cipher::InvalidLength);
-derive_error!(Bip38Error::InnerError, scrypt::errors::InvalidOutputLen);
-derive_error!(Bip38Error::InnerError, scrypt::errors::InvalidParams);
-derive_error!(Bip38Error::InnerError, secp256k1::scalar::OutOfRangeError);
-derive_error!(Bip38Error::InnerError, bitcoin::secp256k1::Error);
-derive_error!(Bip38Error::InnerError, bitcoin::key::FromSliceError);
+derive_error!(Error::InnerError, aes::cipher::InvalidLength);
+derive_error!(Error::InnerError, scrypt::errors::InvalidOutputLen);
+derive_error!(Error::InnerError, scrypt::errors::InvalidParams);
+derive_error!(Error::InnerError, secp256k1::scalar::OutOfRangeError);
+derive_error!(Error::InnerError, bitcoin::secp256k1::Error);
+derive_error!(Error::InnerError, bitcoin::key::FromSliceError);
 
 trait ByteOperation {
     fn sha256_n(&self, n: usize) -> [u8; 32];
@@ -398,20 +395,20 @@ trait SecpOperation
 where
     Self: Sized,
 {
-    fn p2pkh(&self) -> Result<String, Bip38Error>;
-    fn mul_tweak(self, scalar: [u8; 32]) -> Result<Self, Bip38Error>;
+    fn p2pkh(&self) -> Result<String>;
+    fn mul_tweak(self, scalar: [u8; 32]) -> Result<Self>;
 }
 
 impl SecpOperation for PrivateKey {
     #[inline(always)]
-    fn p2pkh(&self) -> Result<String, Bip38Error> {
+    fn p2pkh(&self) -> Result<String> {
         let pub_key = self.public_key(&Secp256k1::default());
         let address = Address::p2pkh(pub_key, NetworkKind::Main).to_string();
         Ok(address)
     }
 
     #[inline(always)]
-    fn mul_tweak(mut self, scalar: [u8; 32]) -> Result<Self, Bip38Error> {
+    fn mul_tweak(mut self, scalar: [u8; 32]) -> Result<Self> {
         use bitcoin::secp256k1::Scalar;
         self.inner = self.inner.mul_tweak(&Scalar::from_be_bytes(scalar)?)?;
         Ok(self)
@@ -420,13 +417,13 @@ impl SecpOperation for PrivateKey {
 
 impl SecpOperation for PublicKey {
     #[inline(always)]
-    fn p2pkh(&self) -> Result<String, Bip38Error> {
+    fn p2pkh(&self) -> Result<String> {
         let address = Address::p2pkh(self, NetworkKind::Main).to_string();
         Ok(address)
     }
 
     #[inline(always)]
-    fn mul_tweak(mut self, scalar: [u8; 32]) -> Result<Self, Bip38Error> {
+    fn mul_tweak(mut self, scalar: [u8; 32]) -> Result<Self> {
         use bitcoin::secp256k1::Scalar;
         let scalar = Scalar::from_be_bytes(scalar)?;
         self.inner = self.inner.mul_tweak(&Secp256k1::default(), &scalar)?;
@@ -479,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ec_pass() -> Result<(), anyhow::Error> {
+    fn test_ec_pass() -> anyhow::Result<()> {
         const TEST_DATA: &[&str] = &[
             //EC multiply, no compression, no lot/sequence numbers
             "TestingOneTwoThree",
@@ -530,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ec_decrypt() -> Result<(), anyhow::Error> {
+    fn test_ec_decrypt() -> anyhow::Result<()> {
         const TEST_DATA: &[&str] = &[
             // EC multiply, no compression, no lot/sequence numbers
             "TestingOneTwoThree",
@@ -555,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ec_generate() -> Result<(), anyhow::Error> {
+    fn test_ec_generate() -> anyhow::Result<()> {
         const TEST_DATA: &[&str] = &[
             // EC multiply, no compression, no lot/sequence numbers
             "69b14acff7bf5b659d43f73f9274631308ee405700fc8585",
@@ -581,7 +578,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ec() -> Result<(), anyhow::Error> {
+    fn test_ec() -> anyhow::Result<()> {
         const TEST_DATA: &[&str] = &[
             "TestingOneTwoThree",
             "Satoshi",

@@ -1,7 +1,7 @@
-mod bip38;
 mod bip39;
-mod mnemonic;
+mod encrypt;
+mod transform;
 
-pub use bip38::{Bip38 as BIP38, Bip38Error};
 pub use bip39::{Language, Mnemonic, MnemonicError};
-pub use mnemonic::{EncError, MnemonicEncryption};
+pub use encrypt::bip38::{Bip38 as BIP38, Error as Bip38Error};
+pub use encrypt::mnemonic::{Error as EncryptError, MnemonicEncryption};
