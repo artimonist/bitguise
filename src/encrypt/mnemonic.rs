@@ -5,9 +5,6 @@ use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArr
 use rand::RngCore;
 use unicode_normalization::UnicodeNormalization;
 
-const DEFAULT_SALT: &str = "Thanks Satoshi!";
-const DERIVE_PATH: &str = "m/0'/0'";
-
 #[derive(Debug)]
 pub(crate) struct MnemonicEx {
     pub mnemonic: Mnemonic,
@@ -54,7 +51,7 @@ impl std::ops::Deref for MnemonicEx {
 
 impl From<Mnemonic> for MnemonicEx {
     fn from(mnemonic: Mnemonic) -> Self {
-        if let Ok(address) = Self::derive_path_address(&mnemonic, DERIVE_PATH) {
+        if let Ok(address) = Self::derive_path_address(&mnemonic, Self::DERIVE_PATH) {
             let addr_hash: u8 = address.as_bytes().sha256_n(2)[0];
             let size_flag: u8 = 8 - (mnemonic.size() as u8 / 3); // 4 | 3 | 2 | 1 | 0
             let verify_index: u16 = ((size_flag as u16) << 8) | (addr_hash as u16);
@@ -121,11 +118,14 @@ impl std::str::FromStr for MnemonicEx {
 }
 
 pub(crate) trait Derivation {
+    const DEFAULT_SALT: &str = "Thanks Satoshi!";
+    const DERIVE_PATH: &str = "m/0'/0'";
+
     /// Derive a secret key from the passphrase and salt.
     fn derive_secret_key(passphrase: &str, salt: &[u8]) -> Result<[u8; 64], Error> {
         let pass: String = passphrase.nfc().collect();
         let argon_salt = {
-            let scrypt_salt = [DEFAULT_SALT.as_bytes(), salt].concat();
+            let scrypt_salt = [Self::DEFAULT_SALT.as_bytes(), salt].concat();
             let params = scrypt::Params::new(20, 8, 8, 64)?;
             let mut result = [0u8; 64];
             scrypt::scrypt(pass.as_bytes(), &scrypt_salt, &params, &mut result)?;
@@ -148,7 +148,7 @@ pub(crate) trait Derivation {
 
         let seed = {
             let mnemonic = mnemonic.to_string();
-            let salt = format!("mnemonic{DEFAULT_SALT}").into_bytes();
+            let salt = format!("mnemonic{}", Self::DEFAULT_SALT).into_bytes();
             let mut seed = [0u8; 64];
             pbkdf2_hmac::<sha2::Sha512>(mnemonic.as_bytes(), &salt, u32::pow(2, 11), &mut seed);
             seed
@@ -206,7 +206,7 @@ impl Encryption for MnemonicEx {
 
         let mnemonic = Mnemonic::from_entropy(entropy, self.language())?;
         let verify = {
-            let address = Self::derive_path_address(self, DERIVE_PATH)?;
+            let address = Self::derive_path_address(self, Self::DERIVE_PATH)?;
             let checksum: u16 = address.as_bytes().sha256_n(2)[0] as u16;
             let size_flag: u16 = 8 - (self.size() as u16 / 3); // 4 | 3 | 2 | 1 | 0
             assert!(size_flag < 5);
@@ -241,7 +241,7 @@ impl Encryption for MnemonicEx {
         let original = Mnemonic::from_entropy(entropy, self.language())?;
 
         if let Some(checksum) = self.verify_sum() {
-            let address = Self::derive_path_address(&original, DERIVE_PATH)?;
+            let address = Self::derive_path_address(&original, Self::DERIVE_PATH)?;
             if checksum != address.as_bytes().sha256_n(2)[0] {
                 return Err(Error::InvalidPass);
             }

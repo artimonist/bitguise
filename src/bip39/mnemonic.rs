@@ -9,6 +9,11 @@ pub struct Mnemonic {
 }
 
 impl Mnemonic {
+    #[inline(always)]
+    pub const fn valid_size(n: usize) -> bool {
+        matches!(n, 12 | 15 | 18 | 21 | 24)
+    }
+
     /// Create a new mnemonic from raw entropy and language.
     /// # Arguments
     /// * `entropy` - A byte slice representing the entropy.  

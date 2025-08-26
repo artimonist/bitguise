@@ -68,73 +68,103 @@ impl Transform for str {
     ///   "K...; W", "L...; W", "5...; W" // W: verify word
     ///   "K...; N", "L...; N", "5...; N" // N: desired size
     fn mnemonic_from_wif(&self, passphrase: &str) -> Result<String> {
-        let (wif, verify) = self.extract_verify();
-        let wif_original = match (wif.as_bytes()[0] as char, wif.len()) {
-            ('6', 58) if wif.starts_with("6P") => wif.bip38_decrypt(passphrase)?, // bip38 encrypted
-            ('K', 52) | ('L', 52) | ('5', 51) => wif.to_string(),                 // private key
-            _ => return Err(anyhow!("Invalid WIF format")),
+        let (wif, verify) = Verify::parse(self)?;
+
+        let entropy = {
+            let wif_original = match (wif.as_bytes()[0] as char, wif.len()) {
+                ('6', 58) if wif.starts_with("6P") => wif.bip38_decrypt(passphrase)?, // bip38 encrypted
+                ('K', 52) | ('L', 52) | ('5', 51) => wif.to_string(),                 // private key
+                _ => return Err(anyhow!("Invalid WIF format")),
+            };
+            &base58::decode(&wif_original)?[1..33]
         };
-        let entropy = &base58::decode(&wif_original)?[1..33];
 
-        // no verify word, return 24 words mnemonic directly
-        if verify.is_empty() {
-            let mnemonic = Mnemonic::from_entropy(entropy, Default::default())?;
-            return Ok(mnemonic.to_string());
-        }
-
-        // only desired size given, return mnemonic with the size
-        if let Ok(size) = self.parse::<usize>()
-            && matches!(size, 12 | 15 | 18 | 21 | 24)
-        {
-            let len = size / 3 * 4;
-            let mnemonic = Mnemonic::from_entropy(&entropy[..len], Default::default())?;
-            return Ok(mnemonic.to_string());
-        }
-
-        // verify word given, try to find the correct language and size
-        let langs = Language::detect(verify)
-            .into_iter()
-            .filter(|&lang| match lang.index_of(verify) {
-                Some(index) => (index >> 8) < 5, // size flag in 0..4
-                None => false,
-            })
-            .collect::<Vec<Language>>();
-
-        if langs.is_empty() {
-            return Err(anyhow!(
-                "Cannot determine language from verify word: {langs:?}"
-            ));
-        }
-
-        let lang = langs[0];
-        let index = lang.index_of(verify).unwrap();
-        let size = (8 - (index >> 8)) * 3; // desired size
-        let check_sum = (index & 0xff) as u8; // check sum
-        let len = size / 3 * 4;
-        let mnemonic = Mnemonic::from_entropy(&entropy[..len], lang)?;
-        if MnemonicEx::from(mnemonic.clone()).verify_sum() != Some(check_sum) {
-            return Err(anyhow!("Verify word does not match mnemonic"));
+        let len = verify.desired_bytes();
+        let mnemonic = Mnemonic::from_entropy(&entropy[..len], verify.language())?;
+        if let Some(check_sum) = verify.verify_sum() {
+            let address = MnemonicEx::derive_path_address(&mnemonic, MnemonicEx::DERIVE_PATH)?;
+            if check_sum != address.as_bytes().sha256_n(2)[0] {
+                return Err(anyhow!("Verify word does not match mnemonic"));
+            }
         }
         Ok(mnemonic.to_string())
     }
 }
 
-trait VerifyExtension {
-    const DELIMITER: &[char] = &[';', ' '];
-    fn extract_verify(&self) -> (&str, &str);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verify {
+    Word(Language, usize), // Mnemonic size (3 bits) and derivation address (m/0'/0') hash (8 bits).
+    Size(u8),              // Mnemonic encrypt or decrypt desired size.
 }
 
-impl VerifyExtension for str {
-    fn extract_verify(&self) -> (&str, &str) {
-        let delimiter = Self::DELIMITER;
-        let (content, verify) = self.rsplit_once(delimiter).unwrap_or((self, ""));
-        if matches!(content.split_whitespace().count(), 11 | 14 | 17 | 20 | 23) {
-            (self, "") // only mnemonic, no verify word
+impl Verify {
+    pub const DELIMITER: char = ';';
+
+    pub fn desired_size(&self) -> usize {
+        match self {
+            Verify::Word(_, i) => (8 - (*i >> 8)) * 3,
+            Verify::Size(n) => *n as usize,
+        }
+    }
+
+    #[inline(always)]
+    pub fn desired_bytes(&self) -> usize {
+        self.desired_size() / 3 * 4
+    }
+
+    #[inline]
+    pub fn language(&self) -> Language {
+        match self {
+            Verify::Word(lang, _) => *lang,
+            Verify::Size(_) => Language::default(),
+        }
+    }
+
+    pub fn verify_sum(&self) -> Option<u8> {
+        match self {
+            Verify::Word(_, i) => Some((i & 0xff) as u8),
+            Verify::Size(_) => None,
+        }
+    }
+
+    pub fn verify_word(&self) -> Option<&'static str> {
+        match self {
+            Verify::Word(lang, i) => lang.word_at(*i),
+            Verify::Size(_) => None,
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<(&str, Verify)> {
+        let (s1, s2) = s.rsplit_once(Self::DELIMITER).unwrap_or((s, ""));
+
+        if s2.is_empty() {
+            let count = s1.split_whitespace().count();
+            if Mnemonic::valid_size(count) {
+                Ok((s1, Verify::Size(count as u8))) // mnemonic size
+            } else {
+                Ok((s1, Verify::Size(24))) // default size
+            }
         } else {
-            (
-                content.trim_end_matches(delimiter),
-                verify.trim_start_matches(delimiter),
-            )
+            Ok((s1.trim_end(), s2.trim_start().parse()?)) // size or word
+        }
+    }
+}
+
+impl std::str::FromStr for Verify {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        if let Ok(n) = s.parse::<u8>()
+            && matches!(n, 12 | 15 | 18 | 21 | 24)
+        {
+            Ok(Verify::Size(n))
+        } else if let Some(&lang) = Language::detect(s).first()
+            && let Some(index) = lang.index_of(s)
+            && (index >> 8) < 5
+        {
+            Ok(Verify::Word(lang, index))
+        } else {
+            Err(anyhow!("Invalid verify word"))
         }
     }
 }
@@ -144,7 +174,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_verify() {
+    fn test_verify_parse() -> Result {
         const TEST_WIF: &[&str] = &[
             "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX",
             "胞",
@@ -153,8 +183,6 @@ mod tests {
             "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX ;胞",
             "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX ; 胞",
             "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX  ;  胞",
-            "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX 胞",
-            "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX    胞",
         ];
         const TEST_MNEMONIC: &[&str] = &[
             "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔",
@@ -164,14 +192,12 @@ mod tests {
             "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔 ;胞",
             "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔 ; 胞",
             "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔  ;  胞",
-            "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔 胞",
-            "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔  胞",
         ];
         for data in [TEST_WIF, TEST_MNEMONIC] {
             for content in data[2..].iter() {
-                let (a, b) = content.extract_verify();
-                assert_eq!(a, data[0]);
-                assert_eq!(b, data[1]);
+                let (s, v) = Verify::parse(content)?;
+                assert_eq!(s, data[0]);
+                assert_eq!(v.verify_word().unwrap(), data[1]);
             }
         }
         const TEST_NONE: &[&str] = &[
@@ -180,10 +206,16 @@ mod tests {
             "生 别 斑 票 纤 费 普 描 比 销 柯 委 敲 普 伍 慰 思 人 曲 燥 恢 校 由 因",
         ];
         for data in TEST_NONE {
-            let (a, b) = data.extract_verify();
-            assert_eq!(a, *data);
-            assert_eq!(b, "");
+            let (s, v) = Verify::parse(data)?;
+            assert_eq!(s, *data);
+            let n = s.split_whitespace().count();
+            if Mnemonic::valid_size(n) {
+                assert_eq!(v, Verify::Size(n as u8));
+            } else {
+                assert_eq!(v, Verify::Size(24));
+            }
         }
+        Ok(())
     }
 
     #[test]
