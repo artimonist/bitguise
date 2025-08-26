@@ -24,7 +24,7 @@ impl Execute for TransformCommand {
         // let mnemonic = Mnemonic::from_str(&self.mnemonic)?;
         // let language = match self.language {
         //     Some(lang) => lang,
-        //     None => select_language(&Language::all())?,
+        //     None => select_language(Language::all())?,
         // };
         // let mnemonic_transformed = encrypt_mnemonic(&mnemonic, language)?;
         // println!("Transformed mnemonic: {}", mnemonic_transformed.to_string());

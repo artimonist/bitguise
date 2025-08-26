@@ -29,7 +29,7 @@ impl Execute for SearchCommand {
     fn execute(&self) -> anyhow::Result<()> {
         let language = match self.language {
             Some(lang) => lang,
-            None => select_language(&Language::all())?,
+            None => select_language(Language::all())?,
         };
 
         let mut o = BufWriter::new(std::io::stdout());

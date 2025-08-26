@@ -24,7 +24,7 @@ impl Execute for TranslateCommand {
         let mnemonic = Mnemonic::from_str(&self.mnemonic)?;
         let language = match self.language {
             Some(lang) => lang,
-            None => select_language(&Language::all())?,
+            None => select_language(Language::all())?,
         };
 
         // translate the mnemonic to the target language

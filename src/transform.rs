@@ -40,7 +40,7 @@ impl Transform for str {
         let mnemonic: Mnemonic = self.parse()?;
 
         let mut entropy = mnemonic.entropy();
-        entropy.resize_with(32, || rand::random::<u8>());
+        entropy.resize_with(32, rand::random::<u8>);
 
         let wif_bytes = [&[0x80], entropy.as_slice(), &[0x01]].concat();
         let mut wif = base58::encode_check(&wif_bytes);
@@ -94,7 +94,7 @@ impl Transform for str {
             })
             .collect::<Vec<Language>>();
 
-        if langs.len() == 0 {
+        if langs.is_empty() {
             return Err(anyhow!(
                 "Cannot determine language from verify word: {langs:?}"
             ));
@@ -113,16 +113,6 @@ impl Transform for str {
     }
 }
 
-trait MnemonicExtension {
-    fn size_flag(&self) -> u8;
-}
-
-impl MnemonicExtension for Mnemonic {
-    fn size_flag(&self) -> u8 {
-        8 - (self.size() as u8 / 3) // 4 | 3 | 2 | 1 | 0
-    }
-}
-
 trait VerifyExtension {
     const DELIMITER: &[char] = &[';', ' '];
     fn extract_verify(&self) -> (&str, &str);
@@ -133,7 +123,7 @@ impl VerifyExtension for str {
         let delimiter = Self::DELIMITER;
         let (content, verify) = self.rsplit_once(delimiter).unwrap_or((self, ""));
         if matches!(content.split_whitespace().count(), 11 | 14 | 17 | 20 | 23) {
-            return (self, ""); // only mnemonic, no verify word
+            (self, "") // only mnemonic, no verify word
         } else {
             (
                 content.trim_end_matches(delimiter),
