@@ -1,5 +1,5 @@
 use super::bip39::Mnemonic;
-use super::encrypt::mnemonic::MnemonicEx;
+use super::encrypt::mnemonic::{ByteOperation, Derivation, MnemonicEx};
 use crate::{BIP38, Language};
 use anyhow::anyhow;
 use bitcoin::base58;
@@ -38,14 +38,20 @@ pub trait Transform {
 impl Transform for str {
     fn mnemonic_to_wif(&self, passphrase: &str) -> Result<String> {
         let mnemonic: Mnemonic = self.parse()?;
-
         let mut entropy = mnemonic.entropy();
-        entropy.resize_with(32, rand::random::<u8>);
+        {
+            let address = MnemonicEx::derive_path_address(&mnemonic, "m/0'/0'")?;
+            let random = address.as_bytes().sha256_n(1);
+            entropy.extend_from_slice(&random[..32 - entropy.len()]);
+        }
 
-        let wif_bytes = [&[0x80], entropy.as_slice(), &[0x01]].concat();
-        let mut wif = base58::encode_check(&wif_bytes);
-        if !passphrase.is_empty() {
-            wif = wif.bip38_encrypt(passphrase)?;
+        let wif = {
+            let wif_bytes = [&[0x80], entropy.as_slice(), &[0x01]].concat();
+            let mut wif = base58::encode_check(&wif_bytes);
+            if !passphrase.is_empty() {
+                wif = wif.bip38_encrypt(passphrase)?;
+            };
+            wif
         };
 
         if let Some(verify) = MnemonicEx::from(mnemonic).verify_word() {
@@ -183,16 +189,14 @@ mod tests {
     #[test]
     fn test_transform() -> Result {
         let mnemonic = "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔";
-        // let wif_ex = "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX; 胞";
-        // let wif_en = "6PYUcbHHu6y9CjAUBtqVVrDinGeUQhLeEQBKw4rjkki7KDrm33vwWugPBa; 胞";
+        let wif = "KyBAktKfYhgtcA63sRL2c5mc3quy3MXBUt8BfFeVc8E5eUkazoMS; 胞";
+        let encrypted = "6PYToQVvVqL7yn7wxd1rTZSPJuePvA8SQoSkRYAvMwDnAqgEwkH4XdbURv; 胞";
 
-        let wif = mnemonic.mnemonic_to_wif("")?;
-        println!("WIF: {wif}");
-        assert_eq!(wif.mnemonic_from_wif("")?, mnemonic, "{wif}");
+        assert_eq!(mnemonic.mnemonic_to_wif("")?, wif);
+        assert_eq!(wif.mnemonic_from_wif("")?, mnemonic);
 
-        let wif = mnemonic.mnemonic_to_wif("123456")?;
-        println!("WIF: {wif}");
-        assert_eq!(wif.mnemonic_from_wif("123456")?, mnemonic, "{wif}");
+        assert_eq!(mnemonic.mnemonic_to_wif("123456")?, encrypted);
+        assert_eq!(encrypted.mnemonic_from_wif("123456")?, mnemonic,);
 
         Ok(())
     }
