@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use crate::bip39::Mnemonic;
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArray};
 use rand::RngCore;
@@ -90,7 +92,10 @@ impl std::str::FromStr for MnemonicEx {
         let count = s.split_whitespace().count();
         if matches!(count, 12 | 15 | 18 | 21 | 24) {
             // none verify word
-            return Ok(s.parse::<Mnemonic>()?.into());
+            return Ok(MnemonicEx {
+                mnemonic: s.parse::<Mnemonic>()?,
+                verify: Verify::Size(count as u8),
+            });
         }
         // has verify word or desired count
         let Some((mnemonic_str, verify_str)) = s.rsplit_once(' ') else {
@@ -282,7 +287,7 @@ impl MnemonicEncryption for str {
             return Err(Error::InvalidSize);
         }
         let original = mnemonic.decrypt_extend(passphrase)?;
-        Ok(original.to_string())
+        Ok(original.deref().to_string())
     }
 }
 
