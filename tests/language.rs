@@ -2,8 +2,8 @@
 use Language::*;
 use disguise::Language;
 
-#[test]
 #[ignore = "pre test"]
+#[test]
 fn language_common_count() {
     let mut repeats = Vec::new();
     let langs = Language::all();

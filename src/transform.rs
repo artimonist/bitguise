@@ -1,8 +1,8 @@
 use super::bip39::Mnemonic;
-use super::encrypt::mnemonic::{ByteOperation, Derivation, MnemonicEx};
-use crate::BIP38;
+use super::encrypt::mnemonic::MnemonicEx;
+use crate::{BIP38, Language};
 use anyhow::anyhow;
-use bitcoin::{Network, PrivateKey, base58};
+use bitcoin::base58;
 
 type Result<T = ()> = anyhow::Result<T>;
 
@@ -70,12 +70,50 @@ impl Transform for str {
         };
         let entropy = &base58::decode(&wif_original)?[1..33];
 
-        println!("entropy: {entropy:x?}");
-        Ok(String::new())
+        // no verify word, return 24 words mnemonic directly
+        if verify.is_empty() {
+            let mnemonic = Mnemonic::from_entropy(entropy, Default::default())?;
+            return Ok(mnemonic.to_string());
+        }
+
+        // only desired size given, return mnemonic with the size
+        if let Ok(size) = self.parse::<usize>()
+            && matches!(size, 12 | 15 | 18 | 21 | 24)
+        {
+            let len = size / 3 * 4;
+            let mnemonic = Mnemonic::from_entropy(&entropy[..len], Default::default())?;
+            return Ok(mnemonic.to_string());
+        }
+
+        // verify word given, try to find the correct language and size
+        let langs = Language::detect(verify)
+            .into_iter()
+            .filter(|&lang| match lang.index_of(verify) {
+                Some(index) => (index >> 8) < 5, // size flag in 0..4
+                None => false,
+            })
+            .collect::<Vec<Language>>();
+
+        if langs.len() == 0 {
+            return Err(anyhow!(
+                "Cannot determine language from verify word: {langs:?}"
+            ));
+        }
+
+        let lang = langs[0];
+        let index = lang.index_of(verify).unwrap();
+        let size = (8 - (index >> 8)) * 3; // desired size
+        let check_sum = (index & 0xff) as u8; // check sum
+        let len = size / 3 * 4;
+        let mnemonic = Mnemonic::from_entropy(&entropy[..len], lang)?;
+        if MnemonicEx::from(mnemonic.clone()).verify_sum() != Some(check_sum) {
+            return Err(anyhow!("Verify word does not match mnemonic"));
+        }
+        Ok(mnemonic.to_string())
     }
 }
 
-pub trait MnemonicExtension {
+trait MnemonicExtension {
     fn size_flag(&self) -> u8;
 }
 
@@ -85,7 +123,7 @@ impl MnemonicExtension for Mnemonic {
     }
 }
 
-pub trait VerifyExtension {
+trait VerifyExtension {
     const DELIMITER: &[char] = &[';', ' '];
     fn extract_verify(&self) -> (&str, &str);
 }
@@ -155,11 +193,16 @@ mod tests {
     #[test]
     fn test_transform() -> Result {
         let mnemonic = "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔";
-        let wif_ex = "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX; 胞";
-        let wif_en = "6PYUcbHHu6y9CjAUBtqVVrDinGeUQhLeEQBKw4rjkki7KDrm33vwWugPBa; 胞";
+        // let wif_ex = "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX; 胞";
+        // let wif_en = "6PYUcbHHu6y9CjAUBtqVVrDinGeUQhLeEQBKw4rjkki7KDrm33vwWugPBa; 胞";
 
-        // assert_eq!(mnemonic.mnemonic_to_wif("")?, wif_ex);
-        assert_eq!(mnemonic.mnemonic_to_wif("123456")?, wif_en);
+        let wif = mnemonic.mnemonic_to_wif("")?;
+        println!("WIF: {wif}");
+        assert_eq!(wif.mnemonic_from_wif("")?, mnemonic, "{wif}");
+
+        let wif = mnemonic.mnemonic_to_wif("123456")?;
+        println!("WIF: {wif}");
+        assert_eq!(wif.mnemonic_from_wif("123456")?, mnemonic, "{wif}");
 
         Ok(())
     }

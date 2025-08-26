@@ -25,8 +25,8 @@ pub enum Language {
 }
 
 impl Language {
-    pub fn all() -> [Language; 10] {
-        [
+    pub fn all() -> &'static [Language] {
+        &[
             Self::ChineseSimplified,
             Self::ChineseTraditional,
             Self::Czech,
@@ -71,7 +71,8 @@ impl Language {
     pub fn detect(word: &str) -> Vec<Language> {
         use crate::Language::*;
         if let Some(ch) = word.chars().next() {
-            let langs = match ch as u32 {
+            // detect by first character
+            let mut langs = match ch as u32 {
                 0x1100..=0x11ff => vec![Korean],
                 0x3040..=0x309f => vec![Japanese],
                 0x4e00..=0x9f9f => vec![ChineseSimplified, ChineseTraditional],
@@ -80,10 +81,9 @@ impl Language {
                     false => vec![French, Spanish],
                 },
             };
-            return langs
-                .into_iter()
-                .filter(|lang| lang.index_of(word).is_some())
-                .collect();
+            // filter by full word
+            langs.retain(|&lang| lang.index_of(word).is_some());
+            return langs;
         }
         vec![]
     }
