@@ -3,7 +3,7 @@ use crate::commands::Execute;
 #[derive(clap::Parser, Debug)]
 pub struct TransformCommand {
     /// The mnemonic to transform.
-    #[clap(value_name = "<MNEMONIC|PRIVATE KEY>")]
+    #[clap(value_name = "MNEMONIC|PRIVATE KEY")]
     pub mnemonic: String,
 
     #[command(flatten)]
