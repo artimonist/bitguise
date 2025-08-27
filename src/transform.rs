@@ -1,6 +1,7 @@
 use super::bip39::Mnemonic;
-use super::encrypt::mnemonic::{ByteOperation, Derivation, MnemonicEx};
-use crate::{BIP38, Language};
+use super::encrypt::mnemonic::{ByteOperation, Error, MnemonicExtension};
+use super::encrypt::verify::Verify;
+use crate::BIP38;
 use anyhow::anyhow;
 use bitcoin::base58;
 
@@ -40,8 +41,7 @@ impl Transform for str {
         let mnemonic: Mnemonic = self.parse()?;
         let mut entropy = mnemonic.entropy();
         {
-            let address = MnemonicEx::derive_path_address(&mnemonic, "m/0'/0'")?;
-            let random = address.as_bytes().sha256_n(1);
+            let random = mnemonic.default_address()?.as_bytes().sha256_n(1);
             entropy.extend_from_slice(&random[..32 - entropy.len()]);
         }
 
@@ -54,11 +54,8 @@ impl Transform for str {
             wif
         };
 
-        if let Some(verify) = MnemonicEx::from(mnemonic).verify_word() {
-            Ok(format!("{wif}; {verify}"))
-        } else {
-            Ok(wif)
-        }
+        let verify = Verify::from_mnemonic(&mnemonic)?;
+        Ok(format!("{wif}; {verify}"))
     }
 
     /// Extract mnemonic from WIF
@@ -68,7 +65,7 @@ impl Transform for str {
     ///   "K...; W", "L...; W", "5...; W" // W: verify word
     ///   "K...; N", "L...; N", "5...; N" // N: desired size
     fn mnemonic_from_wif(&self, passphrase: &str) -> Result<String> {
-        let (wif, verify) = Verify::parse(self)?;
+        let (wif, verify) = Verify::split(self)?;
 
         let entropy = {
             let wif_original = match (wif.as_bytes()[0] as char, wif.len()) {
@@ -81,142 +78,16 @@ impl Transform for str {
 
         let len = verify.desired_bytes();
         let mnemonic = Mnemonic::from_entropy(&entropy[..len], verify.language())?;
-        if let Some(check_sum) = verify.verify_sum() {
-            let address = MnemonicEx::derive_path_address(&mnemonic, MnemonicEx::DERIVE_PATH)?;
-            if check_sum != address.as_bytes().sha256_n(2)[0] {
-                return Err(anyhow!("Verify word does not match mnemonic"));
-            }
+        if !verify.check_mnemonic(&mnemonic)? {
+            return Err(Error::InvalidPass.into());
         }
-        Ok(mnemonic.to_string())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Verify {
-    Word(Language, usize), // Mnemonic size (3 bits) and derivation address (m/0'/0') hash (8 bits).
-    Size(u8),              // Mnemonic encrypt or decrypt desired size.
-}
-
-impl Verify {
-    pub const DELIMITER: char = ';';
-
-    pub fn desired_size(&self) -> usize {
-        match self {
-            Verify::Word(_, i) => (8 - (*i >> 8)) * 3,
-            Verify::Size(n) => *n as usize,
-        }
-    }
-
-    #[inline(always)]
-    pub fn desired_bytes(&self) -> usize {
-        self.desired_size() / 3 * 4
-    }
-
-    #[inline]
-    pub fn language(&self) -> Language {
-        match self {
-            Verify::Word(lang, _) => *lang,
-            Verify::Size(_) => Language::default(),
-        }
-    }
-
-    pub fn verify_sum(&self) -> Option<u8> {
-        match self {
-            Verify::Word(_, i) => Some((i & 0xff) as u8),
-            Verify::Size(_) => None,
-        }
-    }
-
-    pub fn verify_word(&self) -> Option<&'static str> {
-        match self {
-            Verify::Word(lang, i) => lang.word_at(*i),
-            Verify::Size(_) => None,
-        }
-    }
-
-    pub fn parse(s: &str) -> Result<(&str, Verify)> {
-        let (s1, s2) = s.rsplit_once(Self::DELIMITER).unwrap_or((s, ""));
-
-        if s2.is_empty() {
-            let count = s1.split_whitespace().count();
-            if Mnemonic::valid_size(count) {
-                Ok((s1, Verify::Size(count as u8))) // mnemonic size
-            } else {
-                Ok((s1, Verify::Size(24))) // default size
-            }
-        } else {
-            Ok((s1.trim_end(), s2.trim_start().parse()?)) // size or word
-        }
-    }
-}
-
-impl std::str::FromStr for Verify {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        if let Ok(n) = s.parse::<u8>()
-            && matches!(n, 12 | 15 | 18 | 21 | 24)
-        {
-            Ok(Verify::Size(n))
-        } else if let Some(&lang) = Language::detect(s).first()
-            && let Some(index) = lang.index_of(s)
-            && (index >> 8) < 5
-        {
-            Ok(Verify::Word(lang, index))
-        } else {
-            Err(anyhow!("Invalid verify word"))
-        }
+        Ok(format!("{mnemonic}"))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_verify_parse() -> Result {
-        const TEST_WIF: &[&str] = &[
-            "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX",
-            "胞",
-            "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX;胞",
-            "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX; 胞",
-            "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX ;胞",
-            "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX ; 胞",
-            "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX  ;  胞",
-        ];
-        const TEST_MNEMONIC: &[&str] = &[
-            "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔",
-            "胞",
-            "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔;胞",
-            "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔; 胞",
-            "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔 ;胞",
-            "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔 ; 胞",
-            "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔  ;  胞",
-        ];
-        for data in [TEST_WIF, TEST_MNEMONIC] {
-            for content in data[2..].iter() {
-                let (s, v) = Verify::parse(content)?;
-                assert_eq!(s, data[0]);
-                assert_eq!(v.verify_word().unwrap(), data[1]);
-            }
-        }
-        const TEST_NONE: &[&str] = &[
-            "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX",
-            "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔",
-            "生 别 斑 票 纤 费 普 描 比 销 柯 委 敲 普 伍 慰 思 人 曲 燥 恢 校 由 因",
-        ];
-        for data in TEST_NONE {
-            let (s, v) = Verify::parse(data)?;
-            assert_eq!(s, *data);
-            let n = s.split_whitespace().count();
-            if Mnemonic::valid_size(n) {
-                assert_eq!(v, Verify::Size(n as u8));
-            } else {
-                assert_eq!(v, Verify::Size(24));
-            }
-        }
-        Ok(())
-    }
 
     #[test]
     fn test_transform() -> Result {

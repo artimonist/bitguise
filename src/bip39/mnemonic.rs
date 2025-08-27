@@ -14,6 +14,11 @@ impl Mnemonic {
         matches!(n, 12 | 15 | 18 | 21 | 24)
     }
 
+    #[inline(always)]
+    pub const fn valid_bytes(n: usize) -> bool {
+        matches!(n, 16 | 20 | 24 | 28 | 32)
+    }
+
     /// Create a new mnemonic from raw entropy and language.
     /// # Arguments
     /// * `entropy` - A byte slice representing the entropy.  

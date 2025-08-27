@@ -1,123 +1,8 @@
-use std::ops::Deref;
-
-use crate::bip39::Mnemonic;
+use crate::{bip39::Mnemonic, encrypt::verify::Verify};
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArray};
-use rand::RngCore;
 use unicode_normalization::UnicodeNormalization;
 
-#[derive(Debug)]
-pub(crate) struct MnemonicEx {
-    pub mnemonic: Mnemonic,
-    pub verify: Verify,
-}
-
-#[derive(Debug)]
-pub(crate) enum Verify {
-    Word(usize), // Mnemonic size (3 bits) and derivation address (m/0'/0') hash (8 bits).
-    Size(u8),    // Mnemonic encrypt or decrypt desired size.
-}
-
-impl MnemonicEx {
-    pub fn desired_size(&self) -> usize {
-        match self.verify {
-            Verify::Word(i) => (8 - (i >> 8)) * 3,
-            Verify::Size(n) => n as usize,
-        }
-    }
-    pub fn verify_sum(&self) -> Option<u8> {
-        match self.verify {
-            Verify::Word(i) => Some((i & 0xff) as u8),
-            Verify::Size(_) => None,
-        }
-    }
-    pub fn verify_word(&self) -> Option<&str> {
-        match self.verify {
-            Verify::Word(i) => self.mnemonic.language().word_at(i),
-            Verify::Size(_) => None,
-        }
-    }
-    // pub fn size_flag(&self) -> u8 {
-    //     8 - (self.mnemonic.size() as u8 / 3) // 4 | 3 | 2 | 1 | 0
-    // }
-}
-
-impl std::ops::Deref for MnemonicEx {
-    type Target = Mnemonic;
-
-    fn deref(&self) -> &Self::Target {
-        &self.mnemonic
-    }
-}
-
-impl From<Mnemonic> for MnemonicEx {
-    fn from(mnemonic: Mnemonic) -> Self {
-        if let Ok(address) = Self::derive_path_address(&mnemonic, Self::DERIVE_PATH) {
-            let addr_hash: u8 = address.as_bytes().sha256_n(2)[0];
-            let size_flag: u8 = 8 - (mnemonic.size() as u8 / 3); // 4 | 3 | 2 | 1 | 0
-            let verify_index: u16 = ((size_flag as u16) << 8) | (addr_hash as u16);
-            let verify = Verify::Word(verify_index as usize);
-            Self { mnemonic, verify }
-        } else {
-            unreachable!("mnemonic derive failed!");
-        }
-    }
-}
-
-impl std::fmt::Display for MnemonicEx {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.mnemonic)?;
-        match self.verify {
-            Verify::Word(i) => {
-                if let Some(w) = self.language().word_at(i) {
-                    write!(f, "; {w}")?;
-                }
-            }
-            Verify::Size(n) => {
-                if n as usize != self.size() {
-                    write!(f, "; {n}")?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-impl std::str::FromStr for MnemonicEx {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let count = s.split_whitespace().count();
-        if matches!(count, 12 | 15 | 18 | 21 | 24) {
-            // none verify word
-            return Ok(MnemonicEx {
-                mnemonic: s.parse::<Mnemonic>()?,
-                verify: Verify::Size(count as u8),
-            });
-        }
-        // has verify word or desired count
-        let Some((mnemonic_str, verify_str)) = s.rsplit_once(' ') else {
-            return Err(Error::InvalidKey);
-        };
-        let mnemonic: Mnemonic = mnemonic_str.trim_end_matches(';').parse()?;
-
-        let verify = if let Some(i) = mnemonic.language().index_of(verify_str)
-            && i >> 8 < 5
-        {
-            // valid verify word
-            Verify::Word(i)
-        } else if let Ok(n) = verify_str.parse::<u8>()
-            && matches!(n, 12 | 15 | 18 | 21 | 24)
-        {
-            // desired word count
-            Verify::Size(n)
-        } else {
-            return Err(Error::InvalidKey);
-        };
-        Ok(Self { mnemonic, verify })
-    }
-}
-
-pub(crate) trait Derivation {
+pub trait MnemonicExtension: Sized {
     const DEFAULT_SALT: &str = "Thanks Satoshi!";
     const DERIVE_PATH: &str = "m/0'/0'";
 
@@ -163,9 +48,10 @@ pub(crate) trait Derivation {
         };
         Ok(address)
     }
-}
 
-pub(crate) trait Encryption: Derivation + Sized {
+    /// Derive a Bitcoin address from mnemonic by path `m/0'/0'`.
+    fn default_address(&self) -> Result<String, Error>;
+
     /// Encrypt the mnemonic with a passphrase and salt,
     ///   returning the new mnemonic and a verify word.
     /// The salt is used to extend the mnemonic length,
@@ -176,14 +62,20 @@ pub(crate) trait Encryption: Derivation + Sized {
     /// If the verify word is empty, it will ignore the checksum.
     /// The verify word can be a word from the mnemonic language
     ///   or a count in the format "12", "15", "18", "21", or "24".
-    fn decrypt_extend(&self, passphrase: &str) -> Result<Self, Error>;
+    fn decrypt_extend(&self, passphrase: &str, verify: &Verify) -> Result<Self, Error>;
 }
 
-impl Derivation for MnemonicEx {}
-impl Encryption for MnemonicEx {
+impl MnemonicExtension for Mnemonic {
+    #[inline(always)]
+    fn default_address(&self) -> Result<String, Error> {
+        Self::derive_path_address(self, Self::DERIVE_PATH)
+    }
+
     fn encrypt_extend(&self, passphrase: &str, salt: &[u8]) -> Result<Self, Error> {
-        let result_bytes = self.size() / 3 * 4 + salt.len();
-        assert!(matches!(result_bytes, 16 | 20 | 24 | 28 | 32));
+        let desired_bytes = self.size() / 3 * 4 + salt.len();
+        if !Mnemonic::valid_bytes(desired_bytes) {
+            return Err(Error::InvalidSize);
+        }
 
         let secret_key = Self::derive_secret_key(passphrase, salt)?;
         let (mask, aes_key) = secret_key.split_at(32);
@@ -205,24 +97,18 @@ impl Encryption for MnemonicEx {
         }
 
         let mnemonic = Mnemonic::from_entropy(entropy, self.language())?;
-        let verify = {
-            let address = Self::derive_path_address(self, Self::DERIVE_PATH)?;
-            let checksum: u16 = address.as_bytes().sha256_n(2)[0] as u16;
-            let size_flag: u16 = 8 - (self.size() as u16 / 3); // 4 | 3 | 2 | 1 | 0
-            assert!(size_flag < 5);
-            let index = (size_flag << 8 | checksum) as usize;
-            Verify::Word(index)
-        };
-        Ok(MnemonicEx { mnemonic, verify })
+        Ok(mnemonic)
     }
 
-    fn decrypt_extend(&self, passphrase: &str) -> Result<Self, Error> {
-        let result_bytes = self.desired_size() / 3 * 4;
-        assert!(matches!(result_bytes, 16 | 20 | 24 | 28 | 32));
+    fn decrypt_extend(&self, passphrase: &str, verify: &Verify) -> Result<Self, Error> {
+        if verify.desired_size() > self.size() {
+            return Err(Error::InvalidSize);
+        }
 
+        let desired_bytes = verify.desired_bytes();
         let entropy = &mut self.entropy();
         {
-            let salt: Vec<_> = entropy.drain(result_bytes..).collect();
+            let salt: Vec<_> = entropy.drain(desired_bytes..).collect();
             let secret_key = Self::derive_secret_key(passphrase, &salt)?;
             let (mask, aes_key) = secret_key.split_at(32);
 
@@ -231,22 +117,18 @@ impl Encryption for MnemonicEx {
 
             let cipher = aes::Aes256::new(GenericArray::from_slice(aes_key));
             cipher.decrypt_block(GenericArray::from_mut_slice(part1));
-            if result_bytes == 32 {
+            if desired_bytes == 32 {
                 cipher.decrypt_block(GenericArray::from_mut_slice(part2));
             }
             entropy[..32].xor(&mask[..32]);
-            entropy.resize(result_bytes, 0);
+            entropy.resize(desired_bytes, 0);
         }
 
         let original = Mnemonic::from_entropy(entropy, self.language())?;
-
-        if let Some(checksum) = self.verify_sum() {
-            let address = Self::derive_path_address(&original, Self::DERIVE_PATH)?;
-            if checksum != address.as_bytes().sha256_n(2)[0] {
-                return Err(Error::InvalidPass);
-            }
+        if !verify.check_mnemonic(&original)? {
+            return Err(Error::InvalidPass);
         }
-        Ok(original.into())
+        Ok(original)
     }
 }
 
@@ -261,33 +143,48 @@ pub trait MnemonicEncryption {
     /// If the mnemonic is encrypted with a verify word, it will be used to verify the decryption.
     fn mnemonic_decrypt(&self, passphrase: &str) -> Result<String, Error>;
 }
+
 impl MnemonicEncryption for str {
     /// Encrypt the mnemonic with a passphrase and desired word count.
     fn mnemonic_encrypt(&self, passphrase: &str) -> Result<String, Error> {
-        let original: MnemonicEx = self.parse()?;
-        if original.desired_size() < original.size() {
+        let (original, verify) = Verify::parse(self)?;
+        if verify.desired_size() < original.size() {
             return Err(Error::InvalidSize);
         }
 
+        let salt = {
+            let random = original.default_address()?.as_bytes().sha256_n(1);
+            let salt_len = (verify.desired_size() - original.size()) / 3 * 4;
+            random[..salt_len].to_vec()
+        };
+
+        // let original: MnemonicEx = self.parse()?;
+        // if original.desired_size() < original.size() {
+        //     return Err(Error::InvalidSize);
+        // }
+
         // Generate a random salt if the desired size is greater than the original.
         // The salt will be used to extend the mnemonic length.
-        let salt = &mut vec![0u8; (original.desired_size() - original.size()) / 3 * 4];
-        if !salt.is_empty() {
-            rand::thread_rng().fill_bytes(salt);
-        }
+        // let salt = &mut vec![0u8; (verify.desired_size() - original.size()) / 3 * 4];
+        // if !salt.is_empty() {
+        //     rand::thread_rng().fill_bytes(salt);
+        // }
 
-        let mnemonic = original.encrypt_extend(passphrase, salt)?;
-        Ok(mnemonic.to_string())
+        let encrypted_mnemonic = original.encrypt_extend(passphrase, &salt)?;
+        let original_verify = Verify::from_mnemonic(&original)?;
+        Ok(format!("{encrypted_mnemonic}; {original_verify}"))
     }
 
     /// Decrypt the mnemonic with a passphrase.
     fn mnemonic_decrypt(&self, passphrase: &str) -> Result<String, Error> {
-        let mnemonic: MnemonicEx = self.parse()?;
-        if mnemonic.desired_size() > mnemonic.size() {
+        println!("{self}, {passphrase}");
+        let (mnemonic, verify) = Verify::parse(self)?;
+        if verify.desired_size() > mnemonic.size() {
+            println!("{:?}, {}", verify, mnemonic);
             return Err(Error::InvalidSize);
         }
-        let original = mnemonic.decrypt_extend(passphrase)?;
-        Ok(original.deref().to_string())
+        let original = mnemonic.decrypt_extend(passphrase, &verify)?;
+        Ok(format!("{original}"))
     }
 }
 
@@ -295,7 +192,9 @@ impl MnemonicEncryption for str {
 pub enum Error {
     #[error("Invalid key")]
     InvalidKey,
-    #[error("Invalid count")]
+    #[error("Invalid verify word")]
+    InvalidVerify,
+    #[error("Invalid desired size")]
     InvalidSize,
     #[error("Invalid passphrase")]
     InvalidPass,
@@ -360,8 +259,10 @@ mod tests {
 
             let mnemonic = data[1].rsplit_once(';').unwrap().0;
             assert_eq!(mnemonic.mnemonic_decrypt("123456").unwrap(), data[0]);
-            let mnemonic = data[1].replace(';', "");
-            assert_eq!(mnemonic.mnemonic_decrypt("123456").unwrap(), data[0]);
+
+            // Semicolon is necessary for partition off verify.
+            // let mnemonic = data[1].replace(';', "");
+            // assert_eq!(mnemonic.mnemonic_decrypt("123456").unwrap(), data[0]);
         }
     }
 
