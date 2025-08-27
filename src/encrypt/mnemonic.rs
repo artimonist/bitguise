@@ -135,9 +135,15 @@ impl MnemonicExtension for Mnemonic {
 pub trait MnemonicEncryption {
     /// Encrypt the mnemonic with a passphrase and desired word count.
     /// The word count must be one of 12, 15, 18, 21, or 24.
-    /// The mnemonic will be extended with address hash or random salt to match the desired count.
+    /// The mnemonic will be extended with address hash to match the desired count.
     /// Returns the new mnemonic and a verify word for decryption.
-    fn mnemonic_encrypt(&self, passphrase: &str, random: bool) -> Result<String, Error>;
+    fn mnemonic_encrypt(&self, passphrase: &str) -> Result<String, Error>;
+
+    /// Encrypt and extend the mnemonic with a passphrase and desired word count.
+    /// The word count must be one of 12, 15, 18, 21, or 24 and greater than the original count.
+    /// The mnemonic will be extended with random bytes to match the desired count.
+    /// Returns the new mnemonic and a verify word for decryption.
+    fn mnemonic_extend_random(&self, passphrase: &str) -> Result<String, Error>;
 
     /// Decrypt the mnemonic with a passphrase.
     /// If the mnemonic is encrypted with a verify word, it will be used to verify the decryption.
@@ -145,17 +151,31 @@ pub trait MnemonicEncryption {
 }
 
 impl MnemonicEncryption for str {
-    fn mnemonic_encrypt(&self, passphrase: &str, random: bool) -> Result<String, Error> {
+    fn mnemonic_encrypt(&self, passphrase: &str) -> Result<String, Error> {
         let (original, verify) = Verify::parse(self)?;
         if verify.desired_size() < original.size() {
             return Err(Error::InvalidSize);
         }
 
-        let salt_len = (verify.desired_size() - original.size()) / 3 * 4;
-        let salt = match (salt_len, random) {
-            (0, _) => vec![],
-            (n, true) => vec![rand::random(); n],
-            (n, false) => original.default_address()?.as_bytes().sha256_n(1)[..n].to_vec(),
+        let salt = {
+            let salt_len = (verify.desired_size() - original.size()) / 3 * 4;
+            let address_hash = original.default_address()?.as_bytes().sha256_n(1);
+            address_hash[..salt_len].to_vec()
+        };
+
+        let encrypted_mnemonic = original.encrypt_extend(passphrase, &salt)?;
+        let original_verify = Verify::from_mnemonic(&original)?;
+        Ok(format!("{encrypted_mnemonic}; {original_verify}"))
+    }
+
+    fn mnemonic_extend_random(&self, passphrase: &str) -> Result<String, Error> {
+        let (original, verify) = Verify::parse(self)?;
+        if verify.desired_size() <= original.size() {
+            return Err(Error::InvalidSize);
+        }
+        let salt = {
+            let salt_len = (verify.desired_size() - original.size()) / 3 * 4;
+            vec![rand::random(); salt_len]
         };
 
         let encrypted_mnemonic = original.encrypt_extend(passphrase, &salt)?;
@@ -164,10 +184,8 @@ impl MnemonicEncryption for str {
     }
 
     fn mnemonic_decrypt(&self, passphrase: &str) -> Result<String, Error> {
-        println!("{self}, {passphrase}");
         let (mnemonic, verify) = Verify::parse(self)?;
         if verify.desired_size() > mnemonic.size() {
-            println!("{:?}, {}", verify, mnemonic);
             return Err(Error::InvalidSize);
         }
         let original = mnemonic.decrypt_extend(passphrase, &verify)?;
@@ -236,40 +254,55 @@ mod tests {
 
     #[test]
     fn test_mnemonic_encrypt() {
-        const TEST_DATA: &[&str] = &[
-            "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔",
-            "坏 火 发 恐 晒 为 陕 伪 镜 锻 略 越 力 秦 音; 胞",
-        ];
-        for data in TEST_DATA.chunks(2) {
-            assert_eq!(data[0].mnemonic_encrypt("123456", false).unwrap(), data[1]);
-            assert_eq!(data[1].mnemonic_decrypt("123456").unwrap(), data[0]);
+        let original = "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔";
+        let encrypted = "坏 火 发 恐 晒 为 陕 伪 镜 锻 略 越 力 秦 音; 胞";
+        let (x, y) = (original, encrypted);
 
-            let mnemonic = data[1].rsplit_once(';').unwrap().0;
-            assert_eq!(mnemonic.mnemonic_decrypt("123456").unwrap(), data[0]);
+        assert_eq!(x.mnemonic_encrypt("123456").unwrap(), y);
+        assert_eq!(y.mnemonic_decrypt("123456").unwrap(), x);
 
-            // Semicolon is necessary to partition off verify word.
-            // let mnemonic = data[1].replace(';', "");
-            // assert_eq!(mnemonic.mnemonic_decrypt("123456").unwrap(), data[0]);
-        }
-    }
+        // no verify word, decrypt ok.
+        let mnemonic = y.rsplit_once(';').unwrap().0;
+        assert_eq!(mnemonic.mnemonic_decrypt("123456").unwrap(), x);
 
-    #[test]
-    fn test_mnemonic_extend() {
-        let data = "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔";
-        let encrypted = format!("{data}; 24")
-            .mnemonic_encrypt("123456", true)
-            .unwrap();
-        assert_eq!(encrypted.mnemonic_decrypt("123456").unwrap(), data);
-
-        let mnemonic = format!("{}; 15", encrypted.rsplit_once(';').unwrap().0);
-        assert_eq!(mnemonic.mnemonic_decrypt("123456").unwrap(), data);
-        println!("Encrypted: {encrypted}");
+        // semicolon is necessary to partition off verify word.
+        // let mnemonic = y.replace(';', "");
+        // assert_eq!(mnemonic.mnemonic_decrypt("123456").unwrap(), x);
     }
 
     #[test]
     fn test_mnemonic_full() {
         let original = "生 别 斑 票 纤 费 普 描 比 销 柯 委 敲 普 伍 慰 思 人 曲 燥 恢 校 由 因";
-        let encrypted = original.mnemonic_encrypt("123456", true).unwrap();
+        let encrypted =
+            "件 指 坯 常 尸 湖 武 矿 床 平 偶 氧 展 刮 腐 差 驻 沫 梦 季 仪 馏 条 有; 各";
+
+        assert_eq!(original.mnemonic_encrypt("123456").unwrap(), encrypted);
+        assert_eq!(encrypted.mnemonic_decrypt("123456").unwrap(), original);
+    }
+
+    #[test]
+    fn test_mnemonic_extend() {
+        let original = "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔";
+        let encrypted = "抗 鲜 发 赤 外 盗 烂 璃 碰 者 美 姓 捕 阴 莫 礼 下 病; 胞";
+
+        assert_eq!(
+            format!("{original}; 18")
+                .mnemonic_encrypt("123456")
+                .unwrap(),
+            encrypted
+        );
+        assert_eq!(encrypted.mnemonic_decrypt("123456").unwrap(), original);
+
+        let desired = format!("{}; 15", encrypted.rsplit_once(';').unwrap().0);
+        assert_eq!(desired.mnemonic_decrypt("123456").unwrap(), original);
+    }
+
+    #[test]
+    fn test_mnemonic_random() {
+        let original = "派 贤 博 如 恐 臂 诺 职 畜 给 压 钱 牲 案 隔";
+
+        let desired = format!("{original}; 24");
+        let encrypted = desired.mnemonic_extend_random("123456").unwrap();
         assert_eq!(encrypted.mnemonic_decrypt("123456").unwrap(), original);
         println!("Encrypted: {encrypted}");
     }

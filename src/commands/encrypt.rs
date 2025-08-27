@@ -26,7 +26,7 @@ impl<const E: bool> crate::Execute for EncryptCommand<E> {
 
         let count = self.count.unwrap_or(0) as usize;
         let result = match E {
-            true => self.mnemonic.mnemonic_encrypt(&password, true)?,
+            true => self.mnemonic.mnemonic_encrypt(&password)?,
             false => {
                 let word_count = self.mnemonic.split_whitespace().count();
                 if count != 0 && Mnemonic::valid_size(word_count) {
