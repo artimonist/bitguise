@@ -13,6 +13,9 @@ pub enum Verify {
 impl Verify {
     pub const DELIMITER: char = ';';
 
+    /// Create a `Verify` from a given `Mnemonic`.
+    /// The `Verify` will contain the language and an index that encodes both the size
+    /// of the mnemonic and a checksum derived from the default address.
     pub fn from_mnemonic(mnemonic: &Mnemonic) -> Result<Verify> {
         let checksum: u8 = mnemonic.default_address()?.as_bytes().sha256_n(2)[0];
         let size_flag: usize = 8 - (mnemonic.size() / 3); // 4 | 3 | 2 | 1 | 0
@@ -21,6 +24,8 @@ impl Verify {
         Ok(Verify::Word(mnemonic.language(), index))
     }
 
+    /// Check if the given `Mnemonic` matches the criteria defined in `Verify`.
+    /// This includes verifying the size and, if applicable, the checksum.
     pub fn check_mnemonic(&self, mnemonic: &Mnemonic) -> Result<bool> {
         let checksum = mnemonic.default_address()?.as_bytes().sha256_n(2)[0];
         if self.desired_size() != mnemonic.size() {
@@ -32,10 +37,11 @@ impl Verify {
         }
     }
 
+    #[inline]
     pub fn desired_size(&self) -> usize {
-        match self {
-            Verify::Word(_, i) => (8 - (*i >> 8)) * 3,
-            Verify::Size(n) => *n as usize,
+        match *self {
+            Verify::Word(_, i) => (8 - (i >> 8)) * 3,
+            Verify::Size(n) => n as usize,
         }
     }
 
@@ -46,14 +52,15 @@ impl Verify {
 
     #[inline]
     pub fn language(&self) -> Language {
-        match self {
-            Verify::Word(lang, _) => *lang,
+        match *self {
+            Verify::Word(lang, _) => lang,
             Verify::Size(_) => Language::default(),
         }
     }
 
+    #[inline]
     pub fn verify_sum(&self) -> Option<u8> {
-        match self {
+        match *self {
             Verify::Word(_, i) => Some((i & 0xff) as u8),
             Verify::Size(_) => None,
         }
@@ -66,68 +73,65 @@ impl Verify {
     //     }
     // }
 
+    #[inline]
     pub fn split(s: &str) -> Result<(&str, Verify)> {
-        let (s1, s2) = s
+        let (content, _) = s
             .rsplit_once(Self::DELIMITER)
             .map_or((s, ""), |(s1, s2)| (s1.trim_end(), s2.trim_start()));
-
-        if s2.is_empty() {
-            let count = s1.split_whitespace().count();
-            if Mnemonic::valid_size(count) {
-                Ok((s1, Verify::Size(count as u8))) // mnemonic size
-            } else {
-                Ok((s1, Verify::Size(24))) // default size
-            }
-        } else {
-            Ok((s1.trim_end(), s2.trim_start().parse()?)) // size or word
-        }
+        Ok((content, s.parse()?))
     }
 
+    #[inline]
     pub fn parse(s: &str) -> Result<(Mnemonic, Verify)> {
-        let (content, word) = s
+        let (content, _) = s
             .rsplit_once(Self::DELIMITER)
             .map_or((s, ""), |(s1, s2)| (s1.trim_end(), s2.trim_start()));
-        println!("{content}");
-
-        let mnemonic: Mnemonic = content.parse()?;
-        if word.is_empty() {
-            // no verify
-            let verify = Verify::Size(mnemonic.size() as u8);
-            Ok((mnemonic, verify))
-        } else if let Ok(n) = word.parse::<u8>() {
-            // desired size
-            if Mnemonic::valid_size(n as usize) {
-                Ok((mnemonic, Verify::Size(n)))
-            } else {
-                Err(Error::InvalidVerify)
-            }
-        } else {
-            // verify word
-            let lang = mnemonic.language();
-            if let Some(index) = lang.index_of(word) {
-                Ok((mnemonic, Verify::Word(lang, index)))
-            } else {
-                Err(Error::InvalidKey)
-            }
-        }
+        Ok((content.parse()?, s.parse()?))
     }
 }
 
+impl Default for Verify {
+    fn default() -> Self {
+        Verify::Size(24)
+    }
+}
 impl std::str::FromStr for Verify {
     type Err = Error;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        if let Ok(n) = s.parse::<u8>()
-            && matches!(n, 12 | 15 | 18 | 21 | 24)
+        let (content, word) = s
+            .rsplit_once(Self::DELIMITER)
+            .map_or((s, ""), |(s1, s2)| (s1.trim_end(), s2.trim_start()));
+
+        if let Ok(n) = word.parse::<usize>()
+            && Mnemonic::valid_size(n)
         {
-            Ok(Verify::Size(n))
-        } else if let Some(&lang) = Language::detect(s).first()
-            && let Some(index) = lang.index_of(s)
-            && (index >> 8) < 5
-        {
-            Ok(Verify::Word(lang, index))
+            return Ok(Verify::Size(n as u8)); // desired size
+        }
+
+        if let Ok(mnemonic) = content.parse::<Mnemonic>() {
+            let lang = mnemonic.language();
+
+            if word.is_empty() {
+                Ok(Verify::Size(mnemonic.size() as u8)) // no verify
+            } else if let Some(i) = lang.index_of(word)
+                && (i >> 8) < 5
+            {
+                Ok(Verify::Word(lang, i)) // verify word
+            } else {
+                Err(Error::InvalidVerify)
+            }
         } else {
-            Err(Error::InvalidVerify)
+            if word.is_empty() {
+                Ok(Verify::default()) // no verify
+            } else if let Some(&lang) = Language::detect(word).first()
+                && let Some(i) = lang.index_of(word)
+                && (i >> 8) < 5
+            {
+                Ok(Verify::Word(lang, i))
+            } else {
+                Err(Error::InvalidVerify)
+            }
         }
     }
 }
