@@ -1,23 +1,30 @@
 use crate::commands::Execute;
-use disguise::Language;
 
 #[derive(clap::Parser, Debug)]
 pub struct TransformCommand {
     /// The mnemonic to transform.
-    #[clap(value_name = "MNEMONIC")]
+    #[clap(value_name = "<MNEMONIC|PRIVATE KEY>")]
     pub mnemonic: String,
 
-    /// The target language for the mnemonic.
-    #[clap(hide = true, long = "target")]
-    pub language: Option<Language>,
+    #[command(flatten)]
+    pub target: Target,
 
-    /// The password to encrypt the mnemonic.
+    /// Option password to decrypt wif.
     #[clap(hide = true, long = "password")]
     pub password: Option<String>,
 }
 
-// encrypt mnemonic entropy.
-// generate a mnemonic from new entropy.
+#[derive(clap::Args, Debug)]
+#[group(required = false, multiple = false)]
+pub struct Target {
+    /// Transform to wallet's private key or encrypted private key
+    #[clap(long, visible_alias = "wif", value_name = "ENCRYPT")]
+    pub wallet: Option<bool>,
+
+    /// Transform to mnemonic
+    #[clap(long)]
+    pub mnemonic: bool,
+}
 
 impl Execute for TransformCommand {
     fn execute(&self) -> anyhow::Result<()> {

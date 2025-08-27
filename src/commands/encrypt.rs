@@ -3,7 +3,7 @@ use clap::builder::{PossibleValuesParser, TypedValueParser};
 use disguise::{Mnemonic, MnemonicEncryption};
 
 #[derive(clap::Parser, Debug)]
-pub struct EncryptCommand<const E: bool> {
+pub struct EncryptCommand {
     /// Mnemonic to encrypt or decrypt.
     pub mnemonic: String,
 
@@ -15,9 +15,23 @@ pub struct EncryptCommand<const E: bool> {
     /// The password to encrypt or decrypt the mnemonic.
     #[clap(hide = true, long = "password")]
     pub password: Option<String>,
+
+    encrypt: bool,
 }
 
-impl<const E: bool> crate::Execute for EncryptCommand<E> {
+impl EncryptCommand {
+    pub fn encrypt(mut self) -> Self {
+        self.encrypt = true;
+        self
+    }
+
+    pub fn decrypt(mut self) -> Self {
+        self.encrypt = false;
+        self
+    }
+}
+
+impl crate::Execute for EncryptCommand {
     fn execute(&self) -> anyhow::Result<()> {
         let password = match self.password {
             Some(ref pass) => pass.clone(),
@@ -25,13 +39,12 @@ impl<const E: bool> crate::Execute for EncryptCommand<E> {
         };
 
         let count = self.count.unwrap_or(0) as usize;
-        let result = match E {
+        let result = match self.encrypt {
             true => self.mnemonic.mnemonic_encrypt(&password)?,
             false => {
                 let word_count = self.mnemonic.split_whitespace().count();
                 if count != 0 && Mnemonic::valid_size(word_count) {
                     let mnemonic = format!("{}; {count}", self.mnemonic);
-                    println!("Mnemonic: {mnemonic}");
                     mnemonic.mnemonic_decrypt(&password)?
                 } else {
                     self.mnemonic.mnemonic_decrypt(&password)?
