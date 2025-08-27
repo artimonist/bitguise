@@ -1,6 +1,6 @@
 use crate::utils::inquire_password;
 use clap::builder::{PossibleValuesParser, TypedValueParser};
-use disguise::MnemonicEncryption;
+use disguise::{Mnemonic, MnemonicEncryption};
 
 #[derive(clap::Parser, Debug)]
 pub struct EncryptCommand<const E: bool> {
@@ -29,7 +29,7 @@ impl<const E: bool> crate::Execute for EncryptCommand<E> {
             true => self.mnemonic.mnemonic_encrypt(&password)?,
             false => {
                 let word_count = self.mnemonic.split_whitespace().count();
-                if count != 0 && matches!(word_count, 12 | 15 | 18 | 21 | 24) {
+                if count != 0 && Mnemonic::valid_size(word_count) {
                     let mnemonic = format!("{}; {count}", self.mnemonic);
                     println!("Mnemonic: {mnemonic}");
                     mnemonic.mnemonic_decrypt(&password)?

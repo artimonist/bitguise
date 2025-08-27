@@ -29,17 +29,13 @@ impl Mnemonic {
     /// * `Ok(Mnemonic)` - If the mnemonic is successfully created.
     pub fn from_entropy(entropy: &[u8], language: Language) -> Result<Self, MnemonicError> {
         // verify length
-        let length = match entropy.len() {
-            16 => 12,
-            20 => 15,
-            24 => 18,
-            28 => 21,
-            32 => 24,
-            n => return Err(MnemonicError::InvalidCount(n)),
-        };
+        if !Mnemonic::valid_bytes(entropy.len()) {
+            return Err(MnemonicError::InvalidSize);
+        }
 
         // calculate checksum
-        let check_mask = 0xff << (8 - length / 3);
+        let size = entropy.len() / 4 * 3; // 12 | 15 | 18 | 21 | 24
+        let check_mask = 0xff << (8 - size / 3);
         let checksum = Sha256::digest(entropy)[0] & check_mask;
 
         // convert entropy to indices
@@ -47,7 +43,7 @@ impl Mnemonic {
             .concat()
             .bits()
             .chunks(11)
-            .take(length)
+            .take(size)
             .collect();
 
         // convert indices to words
@@ -114,8 +110,8 @@ impl Mnemonic {
 
     pub fn verify_checksum(indices: &[usize]) -> Result<(), MnemonicError> {
         // verify length
-        if !matches!(indices.len(), 12 | 15 | 18 | 21 | 24) {
-            return Err(MnemonicError::InvalidCount(indices.len()));
+        if !Mnemonic::valid_size(indices.len()) {
+            return Err(MnemonicError::InvalidSize);
         }
 
         let mut entropy = Vec::from_bits_chunk(indices.iter().copied(), 11);
@@ -137,8 +133,8 @@ impl std::str::FromStr for Mnemonic {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // verify length
         let words: Vec<&str> = s.split_whitespace().collect();
-        if !matches!(words.len(), 12 | 15 | 18 | 21 | 24) {
-            return Err(MnemonicError::InvalidCount(words.len()));
+        if !Mnemonic::valid_size(words.len()) {
+            return Err(MnemonicError::InvalidSize);
         }
 
         // detect languages
@@ -192,8 +188,8 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum MnemonicError {
-    #[error("Invalid word count: {0}")]
-    InvalidCount(usize),
+    #[error("Invalid word count")]
+    InvalidSize,
 
     #[error("Invalid language")]
     InvalidLanguage,

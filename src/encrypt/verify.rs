@@ -112,6 +112,8 @@ impl std::str::FromStr for Verify {
         if let Ok(mnemonic) = content.parse::<Mnemonic>() {
             let lang = mnemonic.language();
 
+            // if the mnemonic is valid, only accept verify word from the same language
+            // and default verify size is the mnemonic size
             if word.is_empty() {
                 Ok(Verify::Size(mnemonic.size() as u8)) // no verify
             } else if let Some(i) = lang.index_of(word)
@@ -121,17 +123,15 @@ impl std::str::FromStr for Verify {
             } else {
                 Err(Error::InvalidVerify)
             }
+        } else if word.is_empty() {
+            Ok(Verify::default()) // no verify
+        } else if let Some(&lang) = Language::detect(word).first()
+            && let Some(i) = lang.index_of(word)
+            && (i >> 8) < 5
+        {
+            Ok(Verify::Word(lang, i)) // verify word
         } else {
-            if word.is_empty() {
-                Ok(Verify::default()) // no verify
-            } else if let Some(&lang) = Language::detect(word).first()
-                && let Some(i) = lang.index_of(word)
-                && (i >> 8) < 5
-            {
-                Ok(Verify::Word(lang, i))
-            } else {
-                Err(Error::InvalidVerify)
-            }
+            Err(Error::InvalidVerify)
         }
     }
 }
