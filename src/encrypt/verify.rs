@@ -66,12 +66,12 @@ impl Verify {
         }
     }
 
-    // pub fn verify_word(&self) -> Option<&'static str> {
-    //     match self {
-    //         Verify::Word(lang, i) => lang.word_at(*i),
-    //         Verify::Size(_) => None,
-    //     }
-    // }
+    pub fn verify_word(&self) -> Option<&'static str> {
+        match *self {
+            Verify::Word(lang, i) => lang.word_at(i),
+            Verify::Size(_) => None,
+        }
+    }
 
     #[inline]
     pub fn split(s: &str) -> Result<(&str, Verify)> {
@@ -95,6 +95,7 @@ impl Default for Verify {
         Verify::Size(24)
     }
 }
+
 impl std::str::FromStr for Verify {
     type Err = Error;
 
