@@ -104,33 +104,33 @@ impl std::str::FromStr for Verify {
             .rsplit_once(Self::DELIMITER)
             .map_or((s, ""), |(s1, s2)| (s1.trim_end(), s2.trim_start()));
 
-        if let Ok(n) = word.parse::<usize>()
-            && Mnemonic::valid_size(n)
-        {
-            return Ok(Verify::Size(n as u8)); // desired size
+        // no verify
+        if word.is_empty() {
+            return match content.parse::<Mnemonic>() {
+                Ok(mnemonic) => Ok(Verify::Size(mnemonic.size() as u8)),
+                Err(_) => Ok(Verify::default()),
+            };
         }
-
-        if let Ok(mnemonic) = content.parse::<Mnemonic>() {
-            let lang = mnemonic.language();
-
-            // if the mnemonic is valid, only accept verify word from the same language
-            // and default verify size is the mnemonic size
-            if word.is_empty() {
-                Ok(Verify::Size(mnemonic.size() as u8)) // no verify
-            } else if let Some(i) = lang.index_of(word)
-                && (i >> 8) < 5
-            {
-                Ok(Verify::Word(lang, i)) // verify word
-            } else {
-                Err(Error::InvalidVerify)
-            }
-        } else if word.is_empty() {
-            Ok(Verify::default()) // no verify
-        } else if let Some(&lang) = Language::detect(word).first()
-            && let Some(i) = lang.index_of(word)
+        // desired size
+        if let Ok(n) = word.parse::<usize>() {
+            return match Mnemonic::valid_size(n) {
+                true => Ok(Verify::Size(n as u8)),
+                false => Err(Error::InvalidSize),
+            };
+        }
+        // detect language
+        let lang = if let Ok(mnemonic) = content.parse::<Mnemonic>() {
+            mnemonic.language()
+        } else if let Some(&lang) = Language::detect(word).first() {
+            lang
+        } else {
+            Language::default()
+        };
+        // verify word
+        if let Some(i) = lang.index_of(word)
             && (i >> 8) < 5
         {
-            Ok(Verify::Word(lang, i)) // verify word
+            Ok(Verify::Word(lang, i))
         } else {
             Err(Error::InvalidVerify)
         }
