@@ -8,14 +8,19 @@ pub struct EncryptCommand {
     pub mnemonic: String,
 
     /// Desired mnemonic word count.
-    #[clap(value_name = "WORD COUNT", value_parser = PossibleValuesParser::new(["12", "15", "18", "21", "24"])
+    #[clap(value_name = "COUNT", value_parser = PossibleValuesParser::new(["12", "15", "18", "21", "24"])
         .map(|s| s.parse::<u8>().unwrap()))]
     pub count: Option<u8>,
 
-    /// The password to encrypt or decrypt the mnemonic.
+    /// The multiple passwords to encrypt or decrypt.
+    #[clap(long, value_parser, num_args = 1.., value_delimiter = ' ')]
+    pub path: Vec<String>,
+
+    /// The password to encrypt or decrypt.
     #[clap(hide = true, long = "password")]
     pub password: Option<String>,
 
+    #[clap(skip)]
     encrypt: bool,
 }
 
