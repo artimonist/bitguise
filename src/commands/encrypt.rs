@@ -1,16 +1,11 @@
 use crate::utils::inquire_password;
-use clap::builder::{PossibleValuesParser, TypedValueParser};
-use disguise::{Mnemonic, MnemonicEncryption};
+use disguise::MnemonicEncryption;
 
 #[derive(clap::Parser, Debug)]
 pub struct EncryptCommand {
     /// Mnemonic to encrypt or decrypt.
-    pub mnemonic: String,
-
-    /// Desired mnemonic word count.
-    #[clap(value_name = "COUNT", value_parser = PossibleValuesParser::new(["12", "15", "18", "21", "24"])
-        .map(|s| s.parse::<u8>().unwrap()))]
-    pub count: Option<u8>,
+    #[clap(value_name = "MNEMONIC")]
+    pub key: String,
 
     /// The multiple passwords to encrypt or decrypt.
     #[clap(long, value_parser, num_args = 1.., value_delimiter = ' ')]
@@ -38,25 +33,23 @@ impl EncryptCommand {
 
 impl crate::Execute for EncryptCommand {
     fn execute(&self) -> anyhow::Result<()> {
+        if !self.path.is_empty() {
+            // path encrypt or decrypt
+            return Ok(());
+        }
+
         let password = match self.password {
-            Some(ref pass) => pass.clone(),
+            Some(ref s) => s.clone(),
             None => inquire_password(false)?,
         };
 
-        let count = self.count.unwrap_or(0) as usize;
-        let result = match self.encrypt {
-            true => self.mnemonic.mnemonic_encrypt(&password)?,
-            false => {
-                let word_count = self.mnemonic.split_whitespace().count();
-                if count != 0 && Mnemonic::valid_size(word_count) {
-                    let mnemonic = format!("{}; {count}", self.mnemonic);
-                    mnemonic.mnemonic_decrypt(&password)?
-                } else {
-                    self.mnemonic.mnemonic_decrypt(&password)?
-                }
-            }
-        };
-        println!("{result}");
+        if self.encrypt {
+            let encrypted = self.key.mnemonic_encrypt(&password)?;
+            println!("{encrypted}");
+        } else {
+            let original = self.key.mnemonic_decrypt(&password)?;
+            println!("{original}")
+        }
         Ok(())
     }
 }
