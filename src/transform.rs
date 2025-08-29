@@ -1,6 +1,8 @@
+use crate::MnemonicEncryption;
+
 use super::bip39::Mnemonic;
 use super::encrypt::Error;
-use super::encrypt::mnemonic::{ByteOperation, MnemonicExtension};
+use super::encrypt::mnemonic::ByteOperation;
 use super::encrypt::verify::Verify;
 use anyhow::anyhow;
 use bitcoin::base58;
@@ -48,7 +50,7 @@ impl Transform for str {
     ///   "K...; W", "L...; W", "5...; W" // W: verify word
     ///   "K...; N", "L...; N", "5...; N" // N: desired size
     fn mnemonic_from_wif(&self) -> Result<String> {
-        let (wif, verify) = Verify::split(self)?;
+        let (wif, verify) = Verify::extract(self)?;
 
         let entropy = {
             let wif_original = match (wif.as_bytes()[0] as char, wif.len()) {

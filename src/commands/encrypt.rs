@@ -1,5 +1,5 @@
 use crate::utils::inquire_password;
-use disguise::MnemonicEncryption;
+use disguise::{MnemonicEncryption, Verify};
 
 #[derive(clap::Parser, Debug)]
 pub struct EncryptCommand {
@@ -44,10 +44,13 @@ impl crate::Execute for EncryptCommand {
         };
 
         if self.encrypt {
-            let encrypted = self.key.mnemonic_encrypt(&password)?;
-            println!("{encrypted}");
+            let (original, verify) = Verify::parse(&self.key)?;
+            let mnemonic = original.encrypt_extend(&password, verify.desired_size())?;
+            let verify = Verify::from_mnemonic(&original)?;
+            println!("{mnemonic}; {verify}");
         } else {
-            let original = self.key.mnemonic_decrypt(&password)?;
+            let (mnemonic, verify) = Verify::parse(&self.key)?;
+            let original = mnemonic.decrypt_extend(&password, verify)?;
             println!("{original}")
         }
         Ok(())

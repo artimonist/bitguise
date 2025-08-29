@@ -1,6 +1,5 @@
 pub mod bip38;
 pub mod mnemonic;
-pub mod path;
 pub mod verify;
 
 #[derive(thiserror::Error, Debug)]

@@ -1,7 +1,9 @@
 use super::Error;
 use super::mnemonic::ByteOperation;
-use super::mnemonic::MnemonicExtension;
-use crate::bip39::{Language, Mnemonic};
+use crate::{
+    MnemonicEncryption,
+    bip39::{Language, Mnemonic},
+};
 
 type Result<T = ()> = std::result::Result<T, super::Error>;
 
@@ -36,6 +38,10 @@ impl Verify {
             Some(v) => Ok(v == checksum),
             None => Ok(true),
         }
+    }
+
+    pub fn from_word(word: &str) -> Result<Verify> {
+        parse_tail_verify(&format!("; {word}"))
     }
 
     #[inline]
@@ -75,11 +81,11 @@ impl Verify {
     }
 
     #[inline]
-    pub fn split(s: &str) -> Result<(&str, Verify)> {
+    pub fn extract(s: &str) -> Result<(&str, Verify)> {
         let (content, _) = s
             .rsplit_once(Self::DELIMITER)
             .map_or((s, ""), |(s1, s2)| (s1.trim_end(), s2.trim_start()));
-        Ok((content, s.parse()?))
+        Ok((content, parse_tail_verify(s)?))
     }
 
     #[inline]
@@ -87,7 +93,7 @@ impl Verify {
         let (content, _) = s
             .rsplit_once(Self::DELIMITER)
             .map_or((s, ""), |(s1, s2)| (s1.trim_end(), s2.trim_start()));
-        Ok((content.parse()?, s.parse()?))
+        Ok((content.parse()?, parse_tail_verify(s)?))
     }
 }
 
@@ -113,7 +119,7 @@ impl std::convert::TryFrom<&str> for Verify {
     type Error = Error;
 
     fn try_from(s: &str) -> std::result::Result<Self, Self::Error> {
-        s.parse()
+        parse_tail_verify(&format!("; {s}"))
     }
 }
 
@@ -122,65 +128,6 @@ impl std::convert::TryFrom<&Verify> for Verify {
 
     fn try_from(v: &Verify) -> std::result::Result<Self, Self::Error> {
         Ok(*v)
-    }
-}
-
-impl std::str::FromStr for Verify {
-    type Err = Error;
-
-    /// > "mnemonic"
-    /// > "mnemonic; verify"
-    /// > "private_key"
-    /// > "private_key; verify"
-    /// > "verify_word"
-    /// > "verify_size"
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        // "mnemonic; verify" or "private_key; verify"
-        let (content, mut word) = s
-            .rsplit_once(Self::DELIMITER)
-            .map_or((s, ""), |(s1, s2)| (s1.trim_end(), s2.trim_start()));
-
-        // plain verify word or size
-        if word.is_empty()
-            && !s.contains(Self::DELIMITER)
-            && content.split_whitespace().count() == 1
-        {
-            word = s;
-        }
-
-        // no verify
-        if word.is_empty() {
-            return match content.parse::<Mnemonic>() {
-                Ok(mnemonic) => Ok(Verify::Size(mnemonic.size() as u8)),
-                Err(_) => Ok(Verify::default()),
-            };
-        }
-
-        // desired size
-        if let Ok(n) = word.parse::<usize>() {
-            return match Mnemonic::valid_size(n) {
-                true => Ok(Verify::Size(n as u8)),
-                false => Err(Error::InvalidSize),
-            };
-        }
-
-        // detect language
-        let lang = if let Ok(mnemonic) = content.parse::<Mnemonic>() {
-            mnemonic.language()
-        } else if let Some(&lang) = Language::detect(word).first() {
-            lang
-        } else {
-            Language::default()
-        };
-
-        // verify word
-        if let Some(i) = lang.index_of(word)
-            && (i >> 8) < 5
-        {
-            Ok(Verify::Word(lang, i))
-        } else {
-            Err(Error::InvalidVerify)
-        }
     }
 }
 
@@ -193,12 +140,57 @@ impl std::fmt::Display for Verify {
     }
 }
 
+/// > "mnemonic"
+/// > "mnemonic; verify"
+/// > "private_key"
+/// > "private_key; verify"
+fn parse_tail_verify(s: &str) -> Result<Verify> {
+    // "mnemonic; verify" or "private_key; verify"
+    let (content, word) = s
+        .rsplit_once(Verify::DELIMITER)
+        .map_or((s, ""), |(s1, s2)| (s1.trim_end(), s2.trim_start()));
+
+    // no verify
+    if word.is_empty() {
+        return match content.parse::<Mnemonic>() {
+            Ok(mnemonic) => Ok(Verify::Size(mnemonic.size() as u8)),
+            Err(_) => Ok(Verify::default()),
+        };
+    }
+
+    // desired size
+    if let Ok(n) = word.parse::<usize>() {
+        return match Mnemonic::valid_size(n) {
+            true => Ok(Verify::Size(n as u8)),
+            false => Err(Error::InvalidSize),
+        };
+    }
+
+    // detect language
+    let lang = if let Ok(mnemonic) = content.parse::<Mnemonic>() {
+        mnemonic.language()
+    } else if let Some(&lang) = Language::detect(word).first() {
+        lang
+    } else {
+        Language::default()
+    };
+
+    // verify word
+    if let Some(i) = lang.index_of(word)
+        && (i >> 8) < 5
+    {
+        Ok(Verify::Word(lang, i))
+    } else {
+        Err(Error::InvalidVerify)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_verify_split() -> Result {
+    fn test_verify_split() {
         const TEST_WIF: &[&str] = &[
             "KyBAktKfYhgtcA63sRL2c5mc3quy3yepyExduUHzzFSSaHkpDFNX",
             "胞",
@@ -219,7 +211,7 @@ mod tests {
         ];
         for data in [TEST_WIF, TEST_MNEMONIC] {
             for content in data[2..].iter() {
-                let (s, v) = Verify::split(content)?;
+                let (s, v) = Verify::extract(content).unwrap();
                 assert_eq!(s, data[0]);
                 assert_eq!(format!("{v}"), data[1]);
             }
@@ -230,7 +222,7 @@ mod tests {
             "生 别 斑 票 纤 费 普 描 比 销 柯 委 敲 普 伍 慰 思 人 曲 燥 恢 校 由 因",
         ];
         for data in TEST_NONE {
-            let (s, v) = Verify::split(data)?;
+            let (s, v) = Verify::extract(data).expect(data);
             assert_eq!(s, *data);
             let n = s.split_whitespace().count();
             if Mnemonic::valid_size(n) {
@@ -239,7 +231,6 @@ mod tests {
                 assert_eq!(v, Verify::Size(24));
             }
         }
-        Ok(())
     }
 
     #[test]
@@ -253,24 +244,30 @@ mod tests {
     }
 
     #[test]
-    fn test_into_verify() -> Result {
-        fn use_verify<T>(v: T) -> Result
+    fn test_verify_into() -> Result {
+        fn use_verify<T>(v: T) -> Result<Verify>
         where
             T: TryInto<Verify>,
             Error: From<<T as TryInto<Verify>>::Error>,
         {
             let v: Verify = v.try_into()?;
             println!("{v} -> {:?}", v);
-            Ok(())
+            Ok(v)
         }
 
-        use_verify(12)?;
-        use_verify("15")?;
-        use_verify("胞")?;
-        let v: Verify = "坏".parse()?;
-        use_verify(&v)?;
-        use_verify(v)?;
+        use Language::*;
 
+        assert_eq!(use_verify(12)?, Verify::Size(12));
+        assert_eq!(use_verify("15")?, Verify::Size(15));
+        assert_eq!(use_verify("胞")?, Verify::Word(ChineseSimplified, 0x39d));
+
+        let v = Verify::from_word("坏")?;
+        assert_eq!(use_verify(&v)?, Verify::Word(ChineseSimplified, 0x285));
+        assert_eq!(use_verify(v)?, Verify::Word(ChineseSimplified, 0x285));
+
+        assert_eq!(use_verify("")?, Verify::default());
+
+        assert!(use_verify(0).is_err());
         assert!(use_verify(100).is_err());
         assert!(use_verify(11).is_err());
         assert!(use_verify("22").is_err());
