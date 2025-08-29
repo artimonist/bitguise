@@ -58,7 +58,7 @@ impl Transform for str {
         };
 
         let len = verify.desired_bytes();
-        let mnemonic = Mnemonic::from_entropy(&entropy[..len], verify.language())?;
+        let mnemonic = Mnemonic::new(&entropy[..len], verify.language())?;
         if !verify.check_mnemonic(&mnemonic)? {
             return Err(Error::InvalidPass.into());
         }

@@ -27,7 +27,7 @@ impl Mnemonic {
     /// * `language` - The language of the mnemonic.
     /// # Returns
     /// * `Ok(Mnemonic)` - If the mnemonic is successfully created.
-    pub fn from_entropy(entropy: &[u8], language: Language) -> Result<Self, MnemonicError> {
+    pub fn new(entropy: &[u8], language: Language) -> Result<Self, MnemonicError> {
         // verify length
         if !Mnemonic::valid_bytes(entropy.len()) {
             return Err(MnemonicError::InvalidSize);

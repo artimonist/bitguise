@@ -98,7 +98,7 @@ impl MnemonicExtension for Mnemonic {
             entropy.extend_from_slice(salt);
         }
 
-        let mnemonic = Mnemonic::from_entropy(entropy, self.language())?;
+        let mnemonic = Mnemonic::new(entropy, self.language())?;
         Ok(mnemonic)
     }
 
@@ -126,7 +126,7 @@ impl MnemonicExtension for Mnemonic {
             entropy.resize(desired_bytes, 0);
         }
 
-        let original = Mnemonic::from_entropy(entropy, self.language())?;
+        let original = Mnemonic::new(entropy, self.language())?;
         if !verify.check_mnemonic(&original)? {
             return Err(Error::InvalidPass);
         }

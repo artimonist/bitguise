@@ -38,7 +38,7 @@ fn test_mnemonic() {
         );
 
         let language = Mnemonic::detect_language(mnemonic_str.split_whitespace())[0];
-        let mnemonic_entropy = Mnemonic::from_entropy(&entropy, language).unwrap();
+        let mnemonic_entropy = Mnemonic::new(&entropy, language).unwrap();
         let mnemonic_retrieve = Mnemonic::from_str(mnemonic_str).unwrap();
 
         assert_eq!(mnemonic_entropy, mnemonic_retrieve);
