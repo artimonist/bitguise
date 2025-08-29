@@ -1,5 +1,6 @@
 use super::bip39::Mnemonic;
-use super::encrypt::mnemonic::{ByteOperation, Error, MnemonicExtension};
+use super::encrypt::Error;
+use super::encrypt::mnemonic::{ByteOperation, MnemonicExtension};
 use super::encrypt::verify::Verify;
 use anyhow::anyhow;
 use bitcoin::base58;

@@ -1,8 +1,9 @@
+use super::Error;
+use super::mnemonic::ByteOperation;
 use super::mnemonic::MnemonicExtension;
-use super::mnemonic::{ByteOperation, Error};
 use crate::bip39::{Language, Mnemonic};
 
-type Result<T = ()> = std::result::Result<T, Error>;
+type Result<T = ()> = std::result::Result<T, super::Error>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verify {
@@ -96,13 +97,48 @@ impl Default for Verify {
     }
 }
 
+impl std::convert::TryFrom<usize> for Verify {
+    type Error = Error;
+
+    fn try_from(n: usize) -> std::result::Result<Self, Self::Error> {
+        if Mnemonic::valid_size(n) {
+            Ok(Verify::Size(n as u8))
+        } else {
+            Err(Error::InvalidSize)
+        }
+    }
+}
+
+impl std::convert::TryFrom<&str> for Verify {
+    type Error = Error;
+
+    fn try_from(s: &str) -> std::result::Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
 impl std::str::FromStr for Verify {
     type Err = Error;
 
+    /// > "mnemonic"
+    /// > "mnemonic; verify"
+    /// > "private_key"
+    /// > "private_key; verify"
+    /// > "verify_word"
+    /// > "verify_size"
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let (content, word) = s
+        // "mnemonic; verify" or "private_key; verify"
+        let (content, mut word) = s
             .rsplit_once(Self::DELIMITER)
             .map_or((s, ""), |(s1, s2)| (s1.trim_end(), s2.trim_start()));
+
+        // plain verify word or size
+        if word.is_empty()
+            && !s.contains(Self::DELIMITER)
+            && content.split_whitespace().count() == 1
+        {
+            word = s;
+        }
 
         // no verify
         if word.is_empty() {
@@ -111,6 +147,7 @@ impl std::str::FromStr for Verify {
                 Err(_) => Ok(Verify::default()),
             };
         }
+
         // desired size
         if let Ok(n) = word.parse::<usize>() {
             return match Mnemonic::valid_size(n) {
@@ -118,6 +155,7 @@ impl std::str::FromStr for Verify {
                 false => Err(Error::InvalidSize),
             };
         }
+
         // detect language
         let lang = if let Ok(mnemonic) = content.parse::<Mnemonic>() {
             mnemonic.language()
@@ -126,6 +164,7 @@ impl std::str::FromStr for Verify {
         } else {
             Language::default()
         };
+
         // verify word
         if let Some(i) = lang.index_of(word)
             && (i >> 8) < 5
@@ -202,6 +241,29 @@ mod tests {
             let (mnemonic, verify) = Verify::parse(data)?;
             println!("{mnemonic}, {verify}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_into_verify() -> Result {
+        fn use_verify<T>(v: T) -> Result
+        where
+            T: TryInto<Verify>,
+            Error: From<<T as TryInto<Verify>>::Error>,
+        {
+            let v: Verify = v.try_into()?;
+            println!("{v} -> {:?}", v);
+            Ok(())
+        }
+
+        use_verify(12)?;
+        use_verify("15")?;
+        use_verify("胞")?;
+        assert!(use_verify(100).is_err());
+        assert!(use_verify(11).is_err());
+        assert!(use_verify("22").is_err());
+        assert!(use_verify("xxx").is_err());
+
         Ok(())
     }
 }
