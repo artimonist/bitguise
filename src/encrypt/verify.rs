@@ -117,6 +117,14 @@ impl std::convert::TryFrom<&str> for Verify {
     }
 }
 
+impl std::convert::TryFrom<&Verify> for Verify {
+    type Error = Error;
+
+    fn try_from(v: &Verify) -> std::result::Result<Self, Self::Error> {
+        Ok(*v)
+    }
+}
+
 impl std::str::FromStr for Verify {
     type Err = Error;
 
@@ -259,6 +267,10 @@ mod tests {
         use_verify(12)?;
         use_verify("15")?;
         use_verify("胞")?;
+        let v: Verify = "坏".parse()?;
+        use_verify(&v)?;
+        use_verify(v)?;
+
         assert!(use_verify(100).is_err());
         assert!(use_verify(11).is_err());
         assert!(use_verify("22").is_err());

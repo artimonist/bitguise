@@ -17,6 +17,8 @@ pub enum Error {
     EncryptError(String),
     #[error("Mnemonic error: {0}")]
     MnemonicError(#[from] crate::MnemonicError),
+    #[error("Infallible error: {0}")]
+    Infallible(#[from] std::convert::Infallible),
 }
 
 macro_rules! derive_error {
